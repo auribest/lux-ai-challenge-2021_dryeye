@@ -6,6 +6,9 @@
 replays/
 errorlogs/
 
+# Log Files
+*.log
+
 # Vagrant
 .vagrant/
 
