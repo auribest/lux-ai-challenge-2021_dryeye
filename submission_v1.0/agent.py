@@ -1,8 +1,10 @@
+import os
 import math
 import sys
 import logging
 import random
 import numpy as np
+import pandas as pd
 from lux.game import Game
 from lux.game_map import Cell, RESOURCE_TYPES
 from lux.constants import Constants
@@ -11,10 +13,10 @@ from lux.game_constants import GAME_CONSTANTS
 from lux import annotate
 
 # Clean and set log file for logging and stats file
+agent_name = os.path.basename(os.getcwd())
 logfile = 'debug.log'
-statsfile = 'stats.txt'
+statsfile = 'stats.csv'
 open(logfile, 'w')
-open(statsfile, "a")
 logging.basicConfig(filename=logfile, level=logging.INFO)
 
 DIRECTIONS = Constants.DIRECTIONS
@@ -156,6 +158,17 @@ def agent(observation, configuration):
     for city in cities:
         for city_tile in city.citytiles:
             city_tiles.append(city_tile)
+
+    # Create a list of enemy cities and city tiles
+    if player.team == 0:
+        enemy_team_id = 1
+    else:
+        enemy_team_id = 0
+    enemy_cities = game_state.players[enemy_team_id].cities.values()
+    enemy_city_tiles = []
+    for enemy_city in enemy_cities:
+        for enemy_city_tile in enemy_city.citytiles:
+            enemy_city_tiles.append(enemy_city_tile)
 
     # If there is at least 3/4 of workers to city tiles, set build_city bool to true
     build_city = False
@@ -305,8 +318,16 @@ def agent(observation, configuration):
                     logging.info(f'{observation["step"]}: Doing research!\n')
 
     if observation["step"] == 359:
-        with open(statsfile, "a") as f:
-            f.write(f"Total City Tiles on game over: {len(city_tiles)}\n")
+        stats_exist = os.path.isfile(statsfile)
+        if len(city_tiles) > len(enemy_city_tiles):
+            result = 'WIN'
+        elif len(city_tiles) < len(enemy_city_tiles):
+            result = 'LOSE'
+        else:
+            result = 'TIE'
+        stats_dict = {'Agent Name': [agent_name], 'Total City Tiles': [len(city_tiles)], 'Result': [result], 'Map Size': [f'{game_state.map.width}x{game_state.map.height}']}
+        stats_df = pd.DataFrame(data=stats_dict)
+        stats_df.to_csv(statsfile, mode='a', header=not stats_exist, index=False)
 
     # you can add debug annotations using the functions in the annotate object
     # actions.append(annotate.circle(0, 0))

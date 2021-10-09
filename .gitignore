@@ -9,6 +9,9 @@ errorlogs/
 # Log Files
 *.log
 
+# Stats Files
+*.csv
+
 # Vagrant
 .vagrant/
 

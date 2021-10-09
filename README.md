@@ -8,4 +8,12 @@ Team Dryeye's submission for the Lux AI Challenge 2021.
 * [API Documentation](https://github.com/Lux-AI-Challenge/Lux-Design-2021/tree/master/kits)
 * [Online Replay Visualizer](https://2021vis.lux-ai.org/)
 
-***More info TBD.***
+# Execution Instructions from Root Directory
+## Windows CMD
+`python .\battle_agents.py <agent1_version> <agent2_version> <number_of_battles>`
+### Example
+`python .\battle_agents.py v1.0 v1.2 25`
+## Linux Shell
+`python3 .\battle_agents.py <agent1_version> <agent2_version> <number_of_battles>`
+### Example
+`python3 .\battle_agents.py v1.2 v2.0 50`
