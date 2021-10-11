@@ -63,39 +63,124 @@ def get_closest_resource_tile(unit, resource_tiles, player):
     return closest_resource_tile
 
 
-def get_closest_city_tile(player, unit):
+def get_closest_city_tile(player, unit, closest_city_tile=None):
     closest_dist = math.inf
-    closest_city_tile = None
 
-    for k, city in player.cities.items():
+    for i, city in player.cities.items():
         for city_tile in city.citytiles:
             dist = city_tile.pos.distance_to(unit.pos)
             if dist < closest_dist:
-                closest_dist = dist
-                closest_city_tile = city_tile
+                if city_tile != closest_city_tile:
+                    closest_dist = dist
+                    closest_city_tile = city_tile
 
     return closest_city_tile
 
 
 def find_empty_adjacent_tile(game_state, closest_city_tile, observation):
-    build_location = None
-    adjacent_directions = [(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)]
+    adjacent_directions = [(0, 1), (0, -1), (-1, 0), (1, 0)]
+    for direction in adjacent_directions:
+        try:
+            potential_empty_tile = game_state.map.get_cell(closest_city_tile.pos.x + direction[0], closest_city_tile.pos.y + direction[1])
+            logging.info(f'{observation["step"]}: Checking potential empty tile: {potential_empty_tile}\n')
 
+            if not potential_empty_tile.has_resource() and potential_empty_tile.road == 0 and potential_empty_tile.citytile is None:
+                build_location = potential_empty_tile
+                logging.info(f'{observation["step"]}: Found build location: {build_location.pos}\n')
+
+                return build_location
+        except Exception as e:
+            logging.warning(f'{observation["step"]}: Error while looking for empty tile: {str(e)}\n')
+
+    adjacent_directions = [(1, 1), (1, -1), (-1, -1), (-1, 1)]
     for direction in adjacent_directions:
         try:
             potential_empty_tile = game_state.map.get_cell(closest_city_tile.pos.x + direction[0],
                                                            closest_city_tile.pos.y + direction[1])
             logging.info(f'{observation["step"]}: Checking potential empty tile: {potential_empty_tile}\n')
 
-            if potential_empty_tile.resource is None and potential_empty_tile.road == 0 and potential_empty_tile.citytile is None:
+            if not potential_empty_tile.has_resource() and potential_empty_tile.road == 0 and potential_empty_tile.citytile is None:
                 build_location = potential_empty_tile
                 logging.info(f'{observation["step"]}: Found build location: {build_location.pos}\n')
 
-                break
+                return build_location
         except Exception as e:
-            logging.warning(f'{observation["step"]}: No adjacent empty tiles: {str(e)}\n')
+            logging.warning(f'{observation["step"]}: Error while looking for empty tile: {str(e)}\n')
 
-    return build_location
+    adjacent_directions = [(0, 2), (0, -2), (-2, 0), (2, 0)]
+    for direction in adjacent_directions:
+        try:
+            potential_empty_tile = game_state.map.get_cell(closest_city_tile.pos.x + direction[0],
+                                                           closest_city_tile.pos.y + direction[1])
+            logging.info(f'{observation["step"]}: Checking potential empty tile: {potential_empty_tile}\n')
+
+            if not potential_empty_tile.has_resource() and potential_empty_tile.road == 0 and potential_empty_tile.citytile is None:
+                build_location = potential_empty_tile
+                logging.info(f'{observation["step"]}: Found build location: {build_location.pos}\n')
+
+                return build_location
+        except Exception as e:
+            logging.warning(f'{observation["step"]}: Error while looking for empty tile: {str(e)}\n')
+
+    adjacent_directions = [(2, 2), (2, -2), (-2, -2), (-2, 2)]
+    for direction in adjacent_directions:
+        try:
+            potential_empty_tile = game_state.map.get_cell(closest_city_tile.pos.x + direction[0],
+                                                           closest_city_tile.pos.y + direction[1])
+            logging.info(f'{observation["step"]}: Checking potential empty tile: {potential_empty_tile}\n')
+
+            if not potential_empty_tile.has_resource() and potential_empty_tile.road == 0 and potential_empty_tile.citytile is None:
+                build_location = potential_empty_tile
+                logging.info(f'{observation["step"]}: Found build location: {build_location.pos}\n')
+
+                return build_location
+        except Exception as e:
+            logging.warning(f'{observation["step"]}: Error while looking for empty tile: {str(e)}\n')
+
+    logging.warning(f'{observation["step"]}: No adjacent empty tile found!\n')
+
+
+def go_around_city(game_state, worker, actions, target_location):
+    direction_diff = (target_location.pos.x - worker.pos.x, target_location.pos.y - worker.pos.y)
+    x_diff = direction_diff[0]
+    y_diff = direction_diff[1]
+
+    # -x --> West
+    # +x --> East
+    # -y --> North
+    # +y --> South
+
+    # If the highest absolute difference coordinate is y, movement is on y-axis, else on x-axis
+    if abs(y_diff) > abs(x_diff):
+        check_tile = game_state.map.get_cell(worker.pos.x, worker.pos.y + np.sign(y_diff))
+        # If the tile to move toward is not a city tile, movement is still on y-axis, else on x-axis
+        if check_tile.citytile is None:
+            # If the difference is positive, go south, else go north
+            if np.sign(y_diff) == 1:
+                actions.append(worker.move("s"))
+            else:
+                actions.append(worker.move("n"))
+        else:
+            # If the difference is positive, go east, else go west
+            if np.sign(x_diff) == 1:
+                actions.append(worker.move("e"))
+            else:
+                actions.append(worker.move("w"))
+    else:
+        check_tile = game_state.map.get_cell(worker.pos.x + np.sign(x_diff), worker.pos.y)
+        # If the tile to move toward is not a city tile, movement is still on x-axis, else on y-axis
+        if check_tile.citytile is None:
+            # If the difference is positive, go east, else go west
+            if np.sign(x_diff) == 1:
+                actions.append(worker.move("e"))
+            else:
+                actions.append(worker.move("w"))
+        else:
+            # If the difference is positive, go south, else go north
+            if np.sign(y_diff) == 1:
+                actions.append(worker.move("s"))
+            else:
+                actions.append(worker.move("n"))
 
 
 def agent(observation, configuration):
@@ -139,6 +224,11 @@ def agent(observation, configuration):
         if worker.id not in unit_to_city_tile_dict:
             logging.info(f'{observation["step"]}: Found worker with no assigned city tile: {worker.id}\n')
             city_tile_assignment = get_closest_city_tile(player=player, unit=worker)
+
+            # If city is already assigned to another worker, keep looking
+            while city_tile_assignment in unit_to_city_tile_dict.values():
+                city_tile_assignment = get_closest_city_tile(player=player, unit=worker, closest_city_tile=city_tile_assignment)
+
             unit_to_city_tile_dict[worker.id] = city_tile_assignment
 
     logging.info(f'{observation["step"]}: Worker positions: {worker_positions}\n')
@@ -147,8 +237,7 @@ def agent(observation, configuration):
     for worker in workers:
         if worker.id not in unit_to_resource_tile_dict:
             logging.info(f'{observation["step"]}: Found worker with no assigned resource tile: {worker.id}\n')
-            resource_tile_assignment = get_closest_resource_tile(player=player, unit=worker,
-                                                                 resource_tiles=resource_tiles)
+            resource_tile_assignment = get_closest_resource_tile(player=player, unit=worker, resource_tiles=resource_tiles)
             unit_to_resource_tile_dict[worker.id] = resource_tile_assignment
 
     logging.info(f'{observation["step"]}: Workers: {workers}\n')
@@ -204,8 +293,7 @@ def agent(observation, configuration):
                     if tile.has_resource():
                         actions.append(worker.move(worker.pos.direction_to(assigned_resource.pos)))
                     else:
-                        assigned_resource = get_closest_resource_tile(unit=worker, player=player,
-                                                                      resource_tiles=resource_tiles)
+                        assigned_resource = get_closest_resource_tile(unit=worker, player=player, resource_tiles=resource_tiles)
                         unit_to_resource_tile_dict[worker.id] = assigned_resource
                         actions.append(worker.move(worker.pos.direction_to(assigned_resource.pos)))
                 else:
@@ -218,8 +306,7 @@ def agent(observation, configuration):
                             worker_city_fuel = worker_city.fuel
                             worker_city_size = len(worker_city.citytiles)
                             enough_fuel = (worker_city_fuel / worker_city_size) >= 250
-                            logging.info(
-                                f'{observation["step"]}: City info - id {assigned_city_id}, fuel {worker_city_fuel}, size {worker_city_size}, enough_fuel {enough_fuel}\n')
+                            logging.info(f'{observation["step"]}: City info - id {assigned_city_id}, fuel {worker_city_fuel}, size {worker_city_size}, enough_fuel {enough_fuel}\n')
                         except:
                             continue
 
@@ -229,9 +316,12 @@ def agent(observation, configuration):
                             # If build location is None, get the closest city and search for an empty adjacent tile
                             if build_location is None:
                                 closest_city_tile = get_closest_city_tile(player=player, unit=worker)
-                                build_location = find_empty_adjacent_tile(game_state=game_state,
-                                                                          observation=observation,
-                                                                          closest_city_tile=closest_city_tile)
+                                build_location = find_empty_adjacent_tile(game_state=game_state, observation=observation, closest_city_tile=closest_city_tile)
+
+                                # If no build_location was found, keep looking
+                                while build_location is None:
+                                    closest_city_tile = get_closest_city_tile(player=player, unit=worker, closest_city_tile=closest_city_tile)
+                                    build_location = find_empty_adjacent_tile(game_state=game_state, observation=observation, closest_city_tile=closest_city_tile)
 
                             # If the unit is already on the build location, build the city, else navigate to it
                             if worker.pos == build_location.pos:
@@ -245,47 +335,8 @@ def agent(observation, configuration):
                             else:
                                 logging.info(f'{observation["step"]}: Navigating toward build location!\n')
 
-                                direction_diff = (
-                                build_location.pos.x - worker.pos.x, build_location.pos.y - worker.pos.y)
-                                x_diff = direction_diff[0]
-                                y_diff = direction_diff[1]
+                                go_around_city(game_state=game_state, worker=worker, actions=actions, target_location=build_location)
 
-                                # -x --> West
-                                # +x --> East
-                                # -y --> North
-                                # +y --> South
-
-                                # If the highest absolute difference coordinate is y, movement is on y-axis, else on x-axis
-                                if abs(y_diff) > abs(x_diff):
-                                    check_tile = game_state.map.get_cell(unit.pos.x, unit.pos.y + np.sign(y_diff))
-                                    # If the tile to move toward is not a city tile, movement is still on y-axis, else on x-axis
-                                    if check_tile.citytile is None:
-                                        # If the difference is positive, go south, else go north
-                                        if np.sign(y_diff) == 1:
-                                            actions.append(unit.move("s"))
-                                        else:
-                                            actions.append(unit.move("n"))
-                                    else:
-                                        # If the difference is positive, go east, else go west
-                                        if np.sign(x_diff) == 1:
-                                            actions.append(unit.move("e"))
-                                        else:
-                                            actions.append(unit.move("w"))
-                                else:
-                                    check_tile = game_state.map.get_cell(unit.pos.x + np.sign(x_diff), unit.pos.y)
-                                    # If the tile to move toward is not a city tile, movement is still on x-axis, else on y-axis
-                                    if check_tile.citytile is None:
-                                        # If the difference is positive, go east, else go west
-                                        if np.sign(x_diff) == 1:
-                                            actions.append(unit.move("e"))
-                                        else:
-                                            actions.append(unit.move("w"))
-                                    else:
-                                        # If the difference is positive, go south, else go north
-                                        if np.sign(y_diff) == 1:
-                                            actions.append(unit.move("s"))
-                                        else:
-                                            actions.append(unit.move("n"))
                                 continue
 
                         # if unit is a worker and there is no cargo space left, and we have cities, lets return to them
@@ -331,8 +382,7 @@ def agent(observation, configuration):
             result = 'LOSE'
         else:
             result = 'TIE'
-        stats_dict = {'Agent Name': [agent_name], 'Total City Tiles': [len(city_tiles)], 'Result': [result],
-                      'Map Size': [f'{game_state.map.width}x{game_state.map.height}']}
+        stats_dict = {'Agent Name': [agent_name], 'Total City Tiles': [len(city_tiles)], 'Result': [result], 'Map Size': [f'{game_state.map.width}x{game_state.map.height}']}
         stats_df = pd.DataFrame(data=stats_dict)
         stats_df.to_csv(statsfile, mode='a', header=not stats_exist, index=False)
 
