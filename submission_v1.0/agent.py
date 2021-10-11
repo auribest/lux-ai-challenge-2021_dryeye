@@ -83,8 +83,7 @@ def find_empty_adjacent_tile(game_state, closest_city_tile, observation):
 
     for direction in adjacent_directions:
         try:
-            potential_empty_tile = game_state.map.get_cell(closest_city_tile.pos.x + direction[0],
-                                                           closest_city_tile.pos.y + direction[1])
+            potential_empty_tile = game_state.map.get_cell(closest_city_tile.pos.x + direction[0], closest_city_tile.pos.y + direction[1])
             logging.info(f'{observation["step"]}: Checking potential empty tile: {potential_empty_tile}\n')
 
             if potential_empty_tile.resource is None and potential_empty_tile.road == 0 and potential_empty_tile.citytile is None:

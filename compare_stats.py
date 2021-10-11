@@ -5,6 +5,14 @@ import pandas as pd
 
 
 def compare_stats():
+    # Remove old stats
+    all_stats_files = glob.glob('*.csv')
+    for stats_path in all_stats_files:
+        try:
+            os.remove(stats_path)
+        except:
+            pass
+
     # Get stats files of all submission agents
     all_stats_files = glob.glob('**/stats.csv', recursive=True)
 
@@ -42,7 +50,7 @@ def compare_stats():
     agent_names = sorted(stats_info['Agent Name'].unique())
 
     # Create and save informational dataframe of stats as .csv
-    stats_info_dict = {'Agent Name': agent_names, 'Average City Tiles': [agent1_avg_city_tiles, agent2_avg_city_tiles], 'Average Wins': [agent1_total_wins, agent2_total_wins]}
+    stats_info_dict = {'Agent Name': agent_names, 'Average City Tiles': [agent1_avg_city_tiles, agent2_avg_city_tiles], 'Total Wins': [agent1_total_wins, agent2_total_wins]}
     stats_info_df = pd.DataFrame(data=stats_info_dict)
     stats_info_df.to_csv('stats_info.csv')
 
