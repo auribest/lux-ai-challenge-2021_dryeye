@@ -489,9 +489,12 @@ def agent(observation, configuration):
 
             # If cargo space left move to the assigned coal tile, else go to closest city
             if cart.get_cargo_space_left() >= 0:
-                unit_to_target_coords_dict[cart.id] = (unit_to_resource_tile_dict[cart.id].pos.x, unit_to_resource_tile_dict[cart.id].pos.y)
+                try:
+                    unit_to_target_coords_dict[cart.id] = (unit_to_resource_tile_dict[cart.id].pos.x, unit_to_resource_tile_dict[cart.id].pos.y)
 
-                logging.info(f'{observation["step"]}: Cart navigating toward coal!\n')
+                    logging.info(f'{observation["step"]}: Cart navigating toward coal!\n')
+                except:
+                    logging.warning(f'No resource tile found (404) for unit: {unit.id}!\n')
             else:
                 closest_city_tile = get_closest_city_tile(player=player, unit=cart)
                 unit_to_target_coords_dict[cart.id] = (closest_city_tile.pos.x, closest_city_tile.pos.y)
