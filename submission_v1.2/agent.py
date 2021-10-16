@@ -513,13 +513,15 @@ def agent(observation, configuration):
     # Create a worker on every city tile if possible, else research if possible
     can_create_cart = player.researched_coal()
     can_create_unit = len(city_tiles) - len(workers) - len(carts)
+    n_carts = len(carts)
     if len(city_tiles) > 0:
         for city_tile in city_tiles:
             if city_tile.can_act():
                 if can_create_unit > 0:
-                    if can_create_cart and len(carts) < 1:
+                    if can_create_cart and n_carts < 1:
                         actions.append(city_tile.build_cart())
                         can_create_unit -= 1
+                        n_carts += 1
                         logging.info(f'{observation["step"]}: Created a cart!\n')
                     else:
                         actions.append(city_tile.build_worker())
