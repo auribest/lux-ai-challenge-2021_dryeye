@@ -30,6 +30,8 @@ unit_to_city_tile_dict = {}
 unit_to_resource_tile_dict = {}
 # Dictionary with the last three worker positions for each worker
 worker_positions = {}
+# Create a list of future unit positions
+future_positions = []
 
 
 def get_resource_tiles(game_state, width, height):
@@ -61,6 +63,27 @@ def get_closest_resource_tile(unit, resource_tiles, player):
             closest_resource_tile = resource_tile
 
     return closest_resource_tile
+
+
+def get_closest_coal_tile(unit, resource_tiles, player):
+    closest_dist = math.inf
+    closest_coal_tile = None
+
+    # if the unit is a worker and we have space in cargo, lets find the nearest resource tile and try to mine it
+    for resource_tile in resource_tiles:
+        # If the resource is coal, uranium or already assigned to a unit, skip it
+        if not player.researched_coal(): continue
+        if resource_tile in unit_to_resource_tile_dict.values(): continue
+        if resource_tile.resource.type == Constants.RESOURCE_TYPES.COAL:
+            dist = resource_tile.pos.distance_to(unit.pos)
+            if dist < closest_dist:
+                closest_dist = dist
+                closest_coal_tile = resource_tile
+
+    if closest_coal_tile is None:
+        logging.warning(f'NO COAL TILE FOUND 404! {unit.id}\n')
+
+    return closest_coal_tile
 
 
 def get_closest_city_tile(player, unit, closest_city_tile=None):
@@ -183,6 +206,63 @@ def go_around_city(game_state, worker, actions, target_location):
                 actions.append(worker.move("n"))
 
 
+def check_tile_free(unit, target_direction):
+    current_position = unit.pos
+    move_directions = {'n': (0, 1), 's': (0, -1), 'w': (-1, 0), 'e': (1, 0)}
+    move_direction = move_directions[target_direction]
+    target_tile = (current_position[0] + move_direction[0], current_position[1] + move_direction[1])
+
+    # Check if the target tile is in the list of future positions
+    for future_position in future_positions:
+        if target_tile == future_position:
+            return False
+        else:
+            return True
+
+
+def go_around_unit(game_state, unit, actions, target_location):
+    direction_diff = (target_location.pos.x - unit.pos.x, target_location.pos.y - unit.pos.y)
+    x_diff = direction_diff[0]
+    y_diff = direction_diff[1]
+
+    # -x --> West
+    # +x --> East
+    # -y --> North
+    # +y --> South
+
+    # If the highest absolute difference coordinate is y, movement is on y-axis, else on x-axis
+    if abs(y_diff) > abs(x_diff):
+        check_tile = game_state.map.get_cell(unit.pos.x, unit.pos.y + np.sign(y_diff))
+        # If the tile to move toward is not a city tile, movement is still on y-axis, else on x-axis
+        if check_tile not in future_positions:
+            # If the difference is positive, go south, else go north
+            if np.sign(y_diff) == 1:
+                actions.append(unit.move("s"))
+            else:
+                actions.append(unit.move("n"))
+        else:
+            # If the difference is positive, go east, else go west
+            if np.sign(x_diff) == 1:
+                actions.append(unit.move("e"))
+            else:
+                actions.append(unit.move("w"))
+    else:
+        check_tile = game_state.map.get_cell(unit.pos.x + np.sign(x_diff), unit.pos.y)
+        # If the tile to move toward is not a city tile, movement is still on x-axis, else on y-axis
+        if check_tile not in future_positions:
+            # If the difference is positive, go east, else go west
+            if np.sign(x_diff) == 1:
+                actions.append(unit.move("e"))
+            else:
+                actions.append(unit.move("w"))
+        else:
+            # If the difference is positive, go south, else go north
+            if np.sign(y_diff) == 1:
+                actions.append(unit.move("s"))
+            else:
+                actions.append(unit.move("n"))
+
+
 def agent(observation, configuration):
     global game_state
     global build_location
@@ -212,6 +292,9 @@ def agent(observation, configuration):
     # Create a list of worker units
     workers = [unit for unit in player.units if unit.is_worker()]
 
+    # Create a list of cart units
+    carts = [unit for unit in player.units if unit.is_cart()]
+
     # Assign workers to a city tile and save their current position
     for worker in workers:
         # If the worker exists, update the new position, else add new entry to dictionary
@@ -239,6 +322,16 @@ def agent(observation, configuration):
             logging.info(f'{observation["step"]}: Found worker with no assigned resource tile: {worker.id}\n')
             resource_tile_assignment = get_closest_resource_tile(player=player, unit=worker, resource_tiles=resource_tiles)
             unit_to_resource_tile_dict[worker.id] = resource_tile_assignment
+
+    # Assign carts to a coal resource tile
+    for cart in carts:
+        if cart.id not in unit_to_resource_tile_dict:
+            logging.info(f'{observation["step"]}: Found cart with no assigned resource tile: {cart.id}\n')
+            resource_tile_assignment = get_closest_coal_tile(player=player, unit=cart, resource_tiles=resource_tiles)
+            if resource_tile_assignment is None:
+                resource_tile_assignment = get_closest_resource_tile(player=player, unit=cart, resource_tiles=resource_tiles)
+
+            unit_to_resource_tile_dict[cart.id] = resource_tile_assignment
 
     logging.info(f'{observation["step"]}: Workers: {workers}\n')
 
@@ -333,7 +426,7 @@ def agent(observation, configuration):
 
                                 continue
                             else:
-                                logging.info(f'{observation["step"]}: Navigating toward build location!\n')
+                                logging.info(f'{observation["step"]}: Worker navigating toward build location!\n')
 
                                 go_around_city(game_state=game_state, worker=worker, actions=actions, target_location=build_location)
 
@@ -361,15 +454,38 @@ def agent(observation, configuration):
             except Exception as e:
                 logging.warning(f'{observation["step"]}: Worker Error: {str(e)}\n')
 
-    # Create a worker on every city tile possible, else research if possible
-    can_create_worker = len(city_tiles) - len(workers)
+    # we iterate over all our units and do something with them
+    for unit in player.units:
+        if unit.is_cart() and unit.can_act():
+            # Rename unit variable to worker for readability purposes
+            cart = unit
+
+            # If cargo space left move to the assigned coal tile, else go to closest city
+            if cart.get_cargo_space_left() >= 0:
+                move_direction = cart.pos.direction_to(unit_to_resource_tile_dict[cart.id].pos)
+                actions.append(cart.move(move_direction))
+                logging.info(f'{observation["step"]}: Cart navigating toward coal!\n')
+            else:
+                closest_city_tile = get_closest_city_tile(player=player, unit=cart)
+                move_direction = cart.pos.direction_to(closest_city_tile.pos)
+                actions.append(cart.move(move_direction))
+                logging.info(f'{observation["step"]}: Cart navigating toward closest city!\n')
+
+    # Create a worker on every city tile if possible, else research if possible
+    can_create_cart = player.researched_coal()
+    can_create_unit = len(city_tiles) - len(workers) - len(carts)
     if len(city_tiles) > 0:
         for city_tile in city_tiles:
             if city_tile.can_act():
-                if can_create_worker > 0:
-                    actions.append(city_tile.build_worker())
-                    can_create_worker -= 1
-                    logging.info(f'{observation["step"]}: Created a worker!\n')
+                if can_create_unit > 0:
+                    if can_create_cart and len(carts) < 1:
+                        actions.append(city_tile.build_cart())
+                        can_create_unit -= 1
+                        logging.info(f'{observation["step"]}: Created a cart!\n')
+                    else:
+                        actions.append(city_tile.build_worker())
+                        can_create_unit -= 1
+                        logging.info(f'{observation["step"]}: Created a worker!\n')
                 else:
                     actions.append(city_tile.research())
                     logging.info(f'{observation["step"]}: Doing research!\n')
