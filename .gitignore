@@ -5,6 +5,7 @@
 # Lux AI Generated Files
 replays/
 errorlogs/
+*.tar.gz
 
 # Log Files
 *.log
