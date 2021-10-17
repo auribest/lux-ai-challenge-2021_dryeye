@@ -30,11 +30,8 @@ unit_to_city_tile_dict = {}
 unit_to_resource_tile_dict = {}
 # Dictionary with the last three worker positions for each worker
 worker_positions = {}
-# Create a list of future unit positions
-future_positions = []
 # Dictionary for movement target coordinates of every unit
 unit_to_target_coords_dict = {}
-
 # Dictionary for directions
 directions_dict = {"n": (0, -1), "e": (1, 0), "s": (0, 1), "w": (-1, 0)}
 
@@ -170,7 +167,7 @@ def find_empty_adjacent_tile(game_state, closest_city_tile, observation):
     logging.warning(f'{observation["step"]}: No adjacent empty tile found!\n')
 
 
-def go_around_city(game_state, worker, actions, target_location):
+def go_around_city(game_state, worker, target_location):
     direction_diff = (target_location.pos.x - worker.pos.x, target_location.pos.y - worker.pos.y)
     x_diff = direction_diff[0]
     y_diff = direction_diff[1]
@@ -229,24 +226,22 @@ def go_around_city(game_state, worker, actions, target_location):
                 unit_to_target_coords_dict[worker.id] = target_direction
 
 
-def check_tile_free(unit, target_direction):
-    current_position = unit.pos
-    move_directions = {'n': (0, 1), 's': (0, -1), 'w': (-1, 0), 'e': (1, 0)}
-    move_direction = move_directions[target_direction]
-    target_tile = (current_position[0] + move_direction[0], current_position[1] + move_direction[1])
-
-    # Check if the target tile is in the list of future positions
-    for future_position in future_positions:
-        if target_tile == future_position:
+def check_unit_movement_possible(unit, target_coords):
+    # Check if the target tile is in the list of unit to target dictionary values
+    for unit_id in unit_to_target_coords_dict:
+        if unit_to_target_coords_dict[unit_id] == target_coords and unit.id != unit_id:
             return False
         else:
             return True
 
 
-def go_around_unit(game_state, unit, actions, target_location):
-    direction_diff = (target_location.pos.x - unit.pos.x, target_location.pos.y - unit.pos.y)
-    x_diff = direction_diff[0]
-    y_diff = direction_diff[1]
+def navigate_to(unit):
+    # Get current and target cell coordinates
+    current_coords = (unit.pos.x, unit.pos.y)
+    target_tile_coords = unit_to_target_coords_dict[unit.id]
+
+    # Calculate the difference of current and target tile coordinates
+    direction_diff = (target_tile_coords[0] - current_coords[0], target_tile_coords[1] - current_coords[1])
 
     # -x --> West
     # +x --> East
@@ -254,36 +249,45 @@ def go_around_unit(game_state, unit, actions, target_location):
     # +y --> South
 
     # If the highest absolute difference coordinate is y, movement is on y-axis, else on x-axis
-    if abs(y_diff) > abs(x_diff):
-        check_tile = game_state.map.get_cell(unit.pos.x, unit.pos.y + np.sign(y_diff))
-        # If the tile to move toward is not a city tile, movement is still on y-axis, else on x-axis
-        if check_tile not in future_positions:
-            # If the difference is positive, go south, else go north
-            if np.sign(y_diff) == 1:
-                actions.append(unit.move("s"))
-            else:
-                actions.append(unit.move("n"))
+    if abs(direction_diff[1]) > abs(direction_diff[0]):
+        # If the tile to move toward to is not already assigned, proceed movement, else change course
+        if check_unit_movement_possible(unit=unit, target_coords=target_tile_coords):
+            logging.info(f'Dir: s/n, Unit: {unit.id}, Worker: {unit.is_worker()}, Current: ({unit.pos.x}/{unit.pos.y}), Target: ({unit_to_target_coords_dict[unit.id][0]}/{unit_to_target_coords_dict[unit.id][1]})\n')
+            pass
         else:
-            # If the difference is positive, go east, else go west
-            if np.sign(x_diff) == 1:
-                actions.append(unit.move("e"))
+            # If movement east is possible, proceed movement, else try move west
+            target_tile_coords = (current_coords[0] + 1, current_coords[1])
+            if check_unit_movement_possible(unit=unit, target_coords=target_tile_coords):
+                logging.info(f'Dir: e, Unit: {unit.id}, Worker: {unit.is_worker()}, Current: ({unit.pos.x}/{unit.pos.y}), Target: ({unit_to_target_coords_dict[unit.id][0]}/{unit_to_target_coords_dict[unit.id][1]})\n')
+                unit_to_target_coords_dict[unit.id] = target_tile_coords
             else:
-                actions.append(unit.move("w"))
+                # If movement west is possible, proceed movement, else stay putt
+                target_tile_coords = (current_coords[0] - 1, current_coords[1])
+                if check_unit_movement_possible(unit=unit, target_coords=target_tile_coords):
+                    logging.info(f'Dir: w, Unit: {unit.id}, Worker: {unit.is_worker()}, Current: ({unit.pos.x}/{unit.pos.y}), Target: ({unit_to_target_coords_dict[unit.id][0]}/{unit_to_target_coords_dict[unit.id][1]})\n')
+                    unit_to_target_coords_dict[unit.id] = target_tile_coords
+                else:
+                    unit_to_target_coords_dict[unit.id] = current_coords
     else:
-        check_tile = game_state.map.get_cell(unit.pos.x + np.sign(x_diff), unit.pos.y)
-        # If the tile to move toward is not a city tile, movement is still on x-axis, else on y-axis
-        if check_tile not in future_positions:
-            # If the difference is positive, go east, else go west
-            if np.sign(x_diff) == 1:
-                actions.append(unit.move("e"))
-            else:
-                actions.append(unit.move("w"))
+        # If the tile to move toward to is not already assigned, proceed movement, else change course
+        if check_unit_movement_possible(unit=unit, target_coords=target_tile_coords):
+            logging.info(f'Dir: w/e, Unit: {unit.id}, Worker: {unit.is_worker()}, Current: ({unit.pos.x}/{unit.pos.y}), Target: ({unit_to_target_coords_dict[unit.id][0]}/{unit_to_target_coords_dict[unit.id][1]})\n')
+            pass
         else:
-            # If the difference is positive, go south, else go north
-            if np.sign(y_diff) == 1:
-                actions.append(unit.move("s"))
+            # If movement south is possible, proceed movement, else try move north
+            target_tile_coords = (current_coords[0], current_coords[1] + 1)
+            if check_unit_movement_possible(unit=unit, target_coords=target_tile_coords):
+                logging.info(f'Dir: s, Unit: {unit.id}, Worker: {unit.is_worker()}, Current: ({unit.pos.x}/{unit.pos.y}), Target: ({unit_to_target_coords_dict[unit.id][0]}/{unit_to_target_coords_dict[unit.id][1]})\n')
+                unit_to_target_coords_dict[unit.id] = target_tile_coords
             else:
-                actions.append(unit.move("n"))
+                # If movement north is possible, proceed movement, else stay putt
+                target_tile_coords = (current_coords[0], current_coords[1] - 1)
+                if check_unit_movement_possible(unit=unit, target_coords=target_tile_coords):
+                    logging.info(f'Dir: n, Unit: {unit.id}, Worker: {unit.is_worker()}, Current: ({unit.pos.x}/{unit.pos.y}), Target: ({unit_to_target_coords_dict[unit.id][0]}/{unit_to_target_coords_dict[unit.id][1]})\n')
+                    unit_to_target_coords_dict[unit.id] = target_tile_coords
+                else:
+                    logging.info(f'Dir: c, Unit: {unit.id}, Worker: {unit.is_worker()}, Current: ({unit.pos.x}/{unit.pos.y}), Target: ({unit_to_target_coords_dict[unit.id][0]}/{unit_to_target_coords_dict[unit.id][1]})\n')
+                    unit_to_target_coords_dict[unit.id] = current_coords
 
 
 def agent(observation, configuration):
@@ -415,11 +419,16 @@ def agent(observation, configuration):
 
                     # If the assigned resource tile still has a resource, move to it, else assign a new resource tile and move to it
                     if tile.has_resource():
-                        unit_to_target_coords_dict[worker.id] = (assigned_resource.pos.x, assigned_resource.pos.y)
+                        direction = worker.pos.direction_to(assigned_resource.pos)
+                        next_target_coords = (worker.pos.x + directions_dict[direction][0], worker.pos.y + directions_dict[direction][1])
+                        unit_to_target_coords_dict[worker.id] = next_target_coords
                     else:
                         assigned_resource = get_closest_resource_tile(unit=worker, player=player, resource_tiles=resource_tiles)
                         unit_to_resource_tile_dict[worker.id] = assigned_resource
-                        unit_to_target_coords_dict[worker.id] = (assigned_resource.pos.x, assigned_resource.pos.y)
+
+                        direction = worker.pos.direction_to(assigned_resource.pos)
+                        next_target_coords = (worker.pos.x + directions_dict[direction][0], worker.pos.y + directions_dict[direction][1])
+                        unit_to_target_coords_dict[worker.id] = next_target_coords
                 else:
                     # If build_city is true, build a city on an empty adjacent tile of the nearest city
                     if build_city:
@@ -459,25 +468,35 @@ def agent(observation, configuration):
                             else:
                                 logging.info(f'{observation["step"]}: Worker navigating toward build location!\n')
 
-                                go_around_city(game_state=game_state, worker=worker, actions=actions, target_location=build_location)
+                                go_around_city(game_state=game_state, worker=worker, target_location=build_location)
 
                                 continue
 
                         # if unit is a worker and there is no cargo space left, and we have cities, lets return to them
                         elif len(player.cities) > 0:
                             if worker.id in unit_to_city_tile_dict and unit_to_city_tile_dict[worker.id] in city_tiles:
-                                unit_to_target_coords_dict[worker.id] = (unit_to_city_tile_dict[worker.id].pos.x, unit_to_city_tile_dict[worker.id].pos.y)
+                                direction = worker.pos.direction_to(unit_to_city_tile_dict[worker.id].pos)
+                                next_target_coords = (worker.pos.x + directions_dict[direction][0], worker.pos.y + directions_dict[direction][1])
+                                unit_to_target_coords_dict[worker.id] = next_target_coords
                             else:
                                 unit_to_city_tile_dict[worker.id] = get_closest_city_tile(player=player, unit=worker)
-                                unit_to_target_coords_dict[worker.id] = (unit_to_city_tile_dict[worker.id].pos.x, unit_to_city_tile_dict[worker.id].pos.y)
+
+                                direction = worker.pos.direction_to(unit_to_city_tile_dict[worker.id].pos)
+                                next_target_coords = (worker.pos.x + directions_dict[direction][0], worker.pos.y + directions_dict[direction][1])
+                                unit_to_target_coords_dict[worker.id] = next_target_coords
 
                     # if unit is a worker and there is no cargo space left, and we have cities, lets return to them
                     elif len(player.cities) > 0:
                         if worker.id in unit_to_city_tile_dict and unit_to_city_tile_dict[worker.id] in city_tiles:
-                            unit_to_target_coords_dict[worker.id] = (unit_to_city_tile_dict[worker.id].pos.x, unit_to_city_tile_dict[worker.id].pos.y)
+                            direction = worker.pos.direction_to(unit_to_city_tile_dict[worker.id].pos)
+                            next_target_coords = (worker.pos.x + directions_dict[direction][0], worker.pos.y + directions_dict[direction][1])
+                            unit_to_target_coords_dict[worker.id] = next_target_coords
                         else:
                             unit_to_city_tile_dict[worker.id] = get_closest_city_tile(player=player, unit=worker)
-                            unit_to_target_coords_dict[worker.id] = (unit_to_city_tile_dict[worker.id].pos.x, unit_to_city_tile_dict[worker.id].pos.y)
+
+                            direction = worker.pos.direction_to(unit_to_city_tile_dict[worker.id].pos)
+                            next_target_coords = (worker.pos.x + directions_dict[direction][0], worker.pos.y + directions_dict[direction][1])
+                            unit_to_target_coords_dict[worker.id] = next_target_coords
             except Exception as e:
                 logging.warning(f'{observation["step"]}: Worker Error: {str(e)}\n')
 
@@ -490,14 +509,19 @@ def agent(observation, configuration):
             # If cargo space left move to the assigned coal tile, else go to closest city
             if cart.get_cargo_space_left() >= 0:
                 try:
-                    unit_to_target_coords_dict[cart.id] = (unit_to_resource_tile_dict[cart.id].pos.x, unit_to_resource_tile_dict[cart.id].pos.y)
+                    direction = cart.pos.direction_to(unit_to_resource_tile_dict[cart.id].pos)
+                    next_target_coords = (cart.pos.x + directions_dict[direction][0], cart.pos.y + directions_dict[direction][1])
+                    unit_to_target_coords_dict[cart.id] = next_target_coords
 
                     logging.info(f'{observation["step"]}: Cart navigating toward coal!\n')
                 except:
-                    logging.warning(f'No resource tile found (404) for unit: {unit.id}!\n')
+                    logging.warning(f'No resource tile found (404) for unit: {cart.id}!\n')
             else:
                 closest_city_tile = get_closest_city_tile(player=player, unit=cart)
-                unit_to_target_coords_dict[cart.id] = (closest_city_tile.pos.x, closest_city_tile.pos.y)
+
+                direction = cart.pos.direction_to(closest_city_tile.pos)
+                next_target_coords = (cart.pos.x + directions_dict[direction][0], cart.pos.y + directions_dict[direction][1])
+                unit_to_target_coords_dict[cart.id] = next_target_coords
 
                 logging.info(f'{observation["step"]}: Cart navigating toward closest city!\n')
 
@@ -505,10 +529,12 @@ def agent(observation, configuration):
     for unit in player.units:
         if unit.id in unit_to_target_coords_dict:
             try:
+                navigate_to(unit=unit)
+                #logging.info(f'{observation["step"]}: Unit: {unit.id}, Worker: {unit.is_worker()}, Current: ({unit.pos.x}/{unit.pos.y}), Target: ({unit_to_target_coords_dict[unit.id][0]}/{unit_to_target_coords_dict[unit.id][1]})\n')
                 target_tile = game_state.map.get_cell(x=unit_to_target_coords_dict[unit.id][0], y=unit_to_target_coords_dict[unit.id][1])
                 actions.append(unit.move(unit.pos.direction_to(target_tile.pos)))
             except:
-                logging.warning(f'{observation["step"]}: Cannot move to position: x={unit_to_target_coords_dict[unit.id][0]} y={unit_to_target_coords_dict[unit.id][1]} !!!\n')
+                logging.warning(f'{observation["step"]}: Unit: {unit.id} Worker: {unit.is_worker()} Cannot move to position: x={unit_to_target_coords_dict[unit.id][0]} y={unit_to_target_coords_dict[unit.id][1]} !!!\n')
 
     # Create a worker on every city tile if possible, else research if possible
     can_create_cart = player.researched_coal()
@@ -518,7 +544,7 @@ def agent(observation, configuration):
         for city_tile in city_tiles:
             if city_tile.can_act():
                 if can_create_unit > 0:
-                    if can_create_cart and n_carts < 1:
+                    if can_create_cart and n_carts < 0:
                         actions.append(city_tile.build_cart())
                         can_create_unit -= 1
                         n_carts += 1
