@@ -14,10 +14,10 @@ Team Dryeye's submission for the Lux AI Challenge 2021.
 
 # Execution Instructions from Root Directory
 ## Windows CMD
-`python .\battle_agents.py <agent1_version> <agent2_version> <number_of_battles>`
-### Example
-`python .\battle_agents.py v1.0 v1.2 25`
+`python .\battle_agents.py <agent1_version> <agent2_version> <number_of_battles> <optional_seed>`
+### Example (with optional seed argument)
+`python .\battle_agents.py v1.0 v1.2 5 510319936`
 ## Linux Shell
-`python3 .\battle_agents.py <agent1_version> <agent2_version> <number_of_battles>`
-### Example
-`python3 .\battle_agents.py v1.2 v2.0 50`
+`python3 .\battle_agents.py <agent1_version> <agent2_version> <number_of_battles> <optional_seed>`
+### Example (with optional seed argument)
+`python3 .\battle_agents.py v1.1 v1.3 50 164566941`
