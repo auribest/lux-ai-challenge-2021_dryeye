@@ -97,6 +97,7 @@ def assign_workers(workers, observation, player, resource_tiles):
 
             unit_to_city_tile_dict[worker.id] = city_tile_assignment
 
+        # assign
         if worker.id not in unit_to_resource_tile_dict:
             if worker.id not in unit_to_resource_tile_dict:
                 logging.info(f'{observation["step"]}: Found worker with no assigned resource tile: {worker.id}\n')
@@ -112,23 +113,6 @@ def assign_workers(workers, observation, player, resource_tiles):
             resource_tile_assignment = get_closest_resource_tile(player=player, unit=worker,
                                                                  resource_tiles=resource_tiles)
             unit_to_resource_tile_dict[worker.id] = resource_tile_assignment
-
-
-def city_will_survive_next_night(observation, city_tile):
-    # a one tile city burns 18 per night * 10 so either 180 or 230 (not sure if get formula right)=
-    current_round = observation["step"]
-    # check bei 20, 60, 100, 140, 180, 220, 260, 300, 340
-    # TODO: optimize with smart math
-    if current_round == 20 or current_round == 60 or current_round == 100 or current_round == 140 or current_round == 180 or current_round == 220 or current_round == 260 or current_round == 300 or current_round == 340:
-        if city_tile.fuel > 230:
-
-            return True
-        else:
-            logging.info(f'{observation["step"]}: City ({city_tile}) will NOT survive night:\n')
-            return False
-
-    logging.info(f'{observation["step"]}: City ({city_tile}) will survive night:\n')
-    return True
 
 
 def night_comes_soon(observation):
@@ -157,21 +141,18 @@ def get_build_position_tile(game_state, observation, closest_city_tile):
 
 # #####################
 
-# # A-STAR  ###
 ### AStar ###
 class Node():
         def __init__(self, x, y):
             self.x = x
             self.y = y
             self.blocked = False
-            self.gCost =  math.inf  # hohe costen als inizialer wert
+            self.gCost = math.inf  # hohe costen als inizialer wert
             self.hCost = 0
             self.fCost = self.gCost + self.hCost
             self.previousNode = None
 
-            ## Probably not needed TODO remove?
-            # self.resource: Resource = None
-            self.citytile = None
+            self.isEnemyCityTile = False
             self.road = 0
 
         def has_resource(self):
@@ -188,7 +169,6 @@ class AStar():
         self.SIZE = mapsize
         self.c_map:  List[List[Node]] = self.createMap(self.SIZE)
     ## c_map is needed as data structure and Node as class
-
     def createMap(self, size):
         myMap = []
         for y in range(game_state.map.height):
@@ -199,6 +179,7 @@ class AStar():
             myMap.append(row)
         return myMap
 
+    # TODO remove since its doubled funcionality and only used in getClosestTile() (change it there to the global func) | no not really for me
     def toggleCitiesToBlocking(self, setBlocking: bool, my_city_tile=None):
         """
         Toggles cities to block pathfinding based on setBlocking parameter
@@ -219,29 +200,23 @@ class AStar():
                     if game_state.map.get_cell(x, y).citytile:
                         self.getNode(x, y).blocked = False
 
-    # Not in use TODO remove?
-    def update_cMapWithGameMap(self):
-        """
-        useless? the infos are not needed since all i need is to set them to blocked
-        """
-        for x in range(game_state.map.width):
-            for y in range(game_state.map.height):
-                self.getNode(x, y).citytile = game_state.map.get_cell(x, y).citytile
-                self.getNode(x, y).road = game_state.map.get_cell(x, y).road
-
-    def getNode(self, x, y):
-        for row in self.c_map:
-            for node in row:
-                if node.x == x and node.y == y:
-                    return node
     def getNodeWithLowestFCost(self, _openList):
-        cheapestNode = _openList[0]
-        for node in _openList:
-            if node.fCost < cheapestNode.fCost:
-                cheapestNode = node
-        return cheapestNode
+        #cheapestNode = _openList[0]
+        #for node in _openList:
+        #    if node.fCost < cheapestNode.fCost:
+        #        cheapestNode = node
+        #return cheapestNode
+        def minFuncFCost(n):
+            return n.fCost
+        return min(_openList, key=minFuncFCost)
+    def getNode(self, x, y):
+        #for row in self.c_map:
+        #    for node in row:
+        #        if node.x == x and node.y == y:
+        #            return node
+        return self.c_map[y][x]
+
     def getNeighbours(self, node):
-        #print("---Neighbours---")
         top = None
         right = None
         bot = None
@@ -251,27 +226,21 @@ class AStar():
         if node.y > 0:
             top = self.getNode(node.x, node.y-1)
             returnValue.append(top)
-            #print(f"TOP X: {top.x} Y: {top.y}")
         if node.y < self.SIZE-1: # weil size = max index +1  (durch das erstellen mit range(SIZE)
             bot = self.getNode(node.x, node.y+1)
             returnValue.append(bot)
-            #print(f"BOT X: {bot.x} Y: {bot.y}")
         if node.x > 0:
             left = self.getNode(node.x-1, node.y)
             returnValue.append(left)
-            #print(f"LEFT X: {left.x} Y: {left.y}")
         if node.x < self.SIZE-1:
             right = self.getNode(node.x+1, node.y)
             returnValue.append(right)
-            #print(f"RIGHT X: {right.x} Y: {right.y}")
-        #print("---------------")
         return returnValue
     def getDistanceCost(self, node1, node2):
         # Euklidische Distanz
         dist = math.sqrt((node2.x - node1.x)**2 + (node2.y - node1.y)**2)
-        #print(f"DIST {dist}")
         return dist
-    def findPath(self,sX,sY,eX,eY, my_city_tile_x = None, my_city_tile_y = None, move_to_my_city = False):
+    def findPath(self,sX,sY,eX,eY):
         """
         Takes x and y coordinates of start end finish
         returns path from start to finish (List with Nodes)
@@ -288,39 +257,62 @@ class AStar():
         """
         startNode = self.getNode(sX, sY)
         endNode = self.getNode(eX, eY)
+
+        #logging.info(f"EndNode is: {eX}|{eY} and it is blocking: {endNode.blocked}")
+        #if endNode.blocked:
+        #    logging.info(f"EndNode is: {eX}|{eY} and it is blocking: {endNode.blocked}")
+
         openList = []
         openList.append(startNode)
         closedList = []
 
-        if startNode == endNode:
-            logging.info(f" !!!PATH HAS NO LENGTH TARGER ALREADY REACHED!!")
+
+
+        #if startNode == endNode:
+        #    logging.info(f" !!!PATH HAS NO LENGTH TARGER ALREADY REACHED!!")
 
         # Nodes neu initialisieren
-        for x in range(self.SIZE):
-            for y in range(self.SIZE):
-                node = self.getNode(x,y)
+        # 0.0433
+        for row in self.c_map:
+            for node in row:
                 node.gCost = math.inf
                 node.calcFCost()
                 node.previousNode = None
 
+        # init start node
+        startNode.gCost = 0
+        startNode.hCost = self.getDistanceCost(startNode, endNode)
+        startNode.calcFCost()
+
+        # check if target is unreachable and set new target if it is
+        # TODO aber end node ist immer geblocked wenn ein anderer steht oder dort hin will und 1 schritt davor ist.
+        if False:#endNode.blocked:
+            while endNode.blocked:
+                logging.info("Target unreachable - node blocked - setting new Target")
+                if sY >= eY:
+                    endNode = self.getNode(eX, eY + 1)  # unten neue node
+                elif sY < eY:
+                    endNode = self.getNode(eX, eY - 1)  # oben neue node
+                elif sX < eX:
+                    endNode = self.getNode(eX - 1, eY)  # oben neue node
+                elif sX > eX:
+                    endNode = self.getNode(eX + 1, eY)  # oben neue node
+
         # Open list durchsuchen
         while len(openList) > 0:
+
             #print(25 * "#")
 
             currentNode = self.getNodeWithLowestFCost(openList)
             #print(f"Current Node X: {currentNode.x} Y: {currentNode.y}")
 
-            # wenn eine aktulel node die endnode ist = fertig
+            # wenn eine aktuelle node die endnode ist = fertig
             if currentNode == endNode:
                 return self.calcPath(endNode)
 
             # aktuelle node in closed list verschieben
             closedList.append(currentNode)
             openList.remove(currentNode)
-
-            # init start node
-            startNode.gCost = 0
-            startNode.hCost = self.getDistanceCost(startNode, endNode)
 
             for nNode in self.getNeighbours(currentNode):
                 #print(".. new nn ..")
@@ -329,14 +321,14 @@ class AStar():
                 #if nNode is None:
                     #logging.info(f"NOODE NONE")
                     #continue
-                # Wenn die node schon geschlossen ist weiter                # TODO FDFDFSDF
-                #if nNode in closedList:
+                # Wenn die node schon geschlossen ist weiter
+                if nNode in closedList:
                     #logging.info(f"NOODE CLOSED LIST")
-                    #continue
+                    continue
                 # wenn die node ein hinderniss ist weiter
-                #if nNode.blocked:
-                    #logging.info(f"NOODE IS BLOCKING")                     # TODO: dasdassdsdasasdsad
-                    #continue
+                if nNode.blocked:
+                    #logging.info(f"NOODE IS BLOCKING")
+                    continue
 
                 tentativeGCost = self.getDistanceCost(currentNode, nNode) + currentNode.gCost
                 if tentativeGCost < nNode.gCost:
@@ -380,29 +372,33 @@ class AStar():
         @return:
         @rtype:
         """
-        currentNode = path[0] #####################
-        nextNode = path[1]
-        ## should be fine with ifs
-        # x < current go left
-        if nextNode.x < currentNode.x:
-            return DIRECTIONS.WEST
-        # x > current go right
-        if nextNode.x > currentNode.x:
-            return DIRECTIONS.EAST
-        # y < current go up
-        if nextNode.y < currentNode.y:
-            return DIRECTIONS.NORTH
-        # y > current go down
-        if nextNode.y > currentNode.y:
-            return DIRECTIONS.SOUTH
+        if len(path) <= 1:
+            logging.info("couldnt move target = current Node => direction is center (stay)")
+            return DIRECTIONS.CENTER
+        else:
+            currentNode = path[0]
+            nextNode = path[1]
+            ## should be fine with ifs
+            # x < current go left
+            if nextNode.x < currentNode.x:
+                return DIRECTIONS.WEST
+            # x > current go right
+            if nextNode.x > currentNode.x:
+                return DIRECTIONS.EAST
+            # y < current go up
+            if nextNode.y < currentNode.y:
+                return DIRECTIONS.NORTH
+            # y > current go down
+            if nextNode.y > currentNode.y:
+                return DIRECTIONS.SOUTH
+
     def getPathfindingDistanceTo(self, startPos, endPos):
         #logging.info(f"findPath {startPos.x},{startPos.y},{endPos.x},{endPos.y}")
         #logging.info(f"is start blocked? {self.c_map[startPos.x][startPos.y].blocked} -- is end blocked? {self.c_map[endPos.x][endPos.y].blocked}")
         path = self.findPath(startPos.x, startPos.y, endPos.x, endPos.y)
-
         if path is not None:
             return len(path)
-        return None  # todo just return 0 ?
+        return None
 #############
 # #############
 
@@ -415,6 +411,11 @@ def agent(observation, configuration):
     global worker_positions
     global unit_to_final_target_pos_dict
     global directions_dict
+
+    # TODO: - several workers can be assigned to the same city_tile
+    # TODO: - several workers can be assigned to the same resource_tile
+    # TODO: - what if there are more workers then city_tiles (becaus city died)
+    # TODO: - handle None assignements ...
 
     ### Do not edit ###
     if observation["step"] == 0:
@@ -472,31 +473,34 @@ def agent(observation, configuration):
     for worker in workers:
         # assigned_city_id = unit_to_city_tile_dict[worker.id].cityid
         # worker_city = [city for city in cities if city.cityid == assigned_city_id][0]
-        # city_survives = city_will_survive_next_night(observation, worker_city)
         city_survives = True
 
         for city in cities:
-            if city.fuel <= city.get_light_upkeep() * 11:  # and night_comes_soon(observation): # TODO: increase
+            if city.fuel <= city.get_light_upkeep() * 11:   # TODO: handle magic number to fine tune
                 city_survives = False
             else:
                 city_survives = True
-            logging.info(f'{observation["step"]}: City {city.cityid} Survival status: {city_survives} with Fuel: {city.fuel}\n')
+            logging.info(f'{observation["step"]}: City ({city.cityid}) Survival status: {city_survives} with Fuel: {city.fuel}\n')
 
         if city_survives:
             continue
         else:
-            if worker.get_cargo_space_left() <= 25:  # TODO: anpassen
+            if worker.get_cargo_space_left() <= 25:         # TODO: handlemagic number to fine tune
                 assigned_city_tile = unit_to_city_tile_dict[worker.id]
                 unit_to_final_target_pos_dict[worker.id] = assigned_city_tile.pos
 
     # 2.3. Check if cargo of worker is full - If yes and if city survives - get a buildPosition and go to that position
     for worker in workers:
+
         building_position_tile = get_build_position_tile(game_state, observation, unit_to_city_tile_dict[worker.id])
+
         if worker.get_cargo_space_left() == 0 and city_survives:
-            logging.info(f'{observation["step"]}: LETS BUILD A CITY with worker {worker.id}... :\n')
+            logging.info(f'{observation["step"]}: Worker ({worker.id}) wants to build a City!\n')
             want_to_build = True
             unit_to_final_target_pos_dict[worker.id] = building_position_tile.pos
         # If position is reached and want_to_build is true, build the city
+        if building_position_tile is None:  # TODO: make a real solution
+            continue
         if worker.pos == building_position_tile.pos and want_to_build:
             actions.append(worker.build_city())
             want_to_build = False
@@ -530,8 +534,9 @@ def agent(observation, configuration):
     aStar.toggleCitiesToBlocking(False)
 
     for worker in workers:
-        logging.info(f'{observation["step"]}: Worker {worker.id} Target is >: {unit_to_final_target_pos_dict[worker.id]}\n')
+        logging.info(f'{observation["step"]}: Worker ({worker.id}) has the target: {unit_to_final_target_pos_dict[worker.id]}\n')
         if worker.pos != unit_to_final_target_pos_dict[worker.id]:
+
             startx, starty = worker.pos.x, worker.pos.y
             endx, endy = unit_to_final_target_pos_dict[worker.id].x, unit_to_final_target_pos_dict[worker.id].y
 
@@ -541,23 +546,30 @@ def agent(observation, configuration):
                 aStar.toggleCitiesToBlocking(True)
 
             path = aStar.findPath(startx, starty, endx, endy)
-            worker_direction = aStar.pathToDirection(path)
-            actions.append(worker.move(worker_direction))
-            # block node for the next worker
-            aStar.getNode(path[1].x, path[1].y).blocked = True
-            worker_blocked_nodes.append(aStar.getNode(path[1].x, path[1].y))
+            logging.info(f'{observation["step"]}: Pathfinding start: ({startx}/{starty}) Pathfinding end: ({endx}/{endy}) findpath returned: {path} typeof: {type(path)} \n')
+            if path is not None:
+                worker_direction = aStar.pathToDirection(path)
+                actions.append(worker.move(worker_direction))
+
+                # block node for the next worker
+                aStar.getNode(path[1].x, path[1].y).blocked = True
+                worker_blocked_nodes.append(aStar.getNode(path[1].x, path[1].y))
+
         else:
-            logging.info(f'{observation["step"]}: WELL, ... worker {worker.id} is already at target\n')
+            logging.info(f'{observation["step"]}: Worker ({worker.id}) is already at his target\n')
 
     # clear nodes
     for node in worker_blocked_nodes:
         node.blocked = False
 
-    #for worker in workers:
-    #    target_pos = unit_to_final_target_pos_dict[worker.id]
-    #    logging.info(f'{observation["step"]}: Worker ({worker.id}) wants to move to : {target_pos} so action is to: {worker.pos.direction_to((target_pos))} \n')
-    #    actions.append(worker.move(worker.pos.direction_to(target_pos)))
-
+    # print dicts
+    for worker in workers:
+        if worker.id in unit_to_city_tile_dict:
+            worker_city_tile = unit_to_city_tile_dict[worker.id]
+            logging.info(f'XX {observation["step"]}: Worker ({worker.id}) is assigned to city_tile {worker_city_tile.pos}\n')
+        if worker.id in unit_to_resource_tile_dict:
+            worker_resource_tile = unit_to_resource_tile_dict[worker.id]
+            logging.info(f'XX {observation["step"]}: Worker ({worker.id}) is assigned to resource {worker_resource_tile.pos}\n')
 
     if observation["step"] == 359:
         stats_exist = os.path.isfile(statsfile)
