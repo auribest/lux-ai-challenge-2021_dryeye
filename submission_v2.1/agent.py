@@ -27,6 +27,7 @@ game_state = None
 # Initialize relevant dictionaries
 unit_to_resource_tile_dict = {}
 unit_to_target_tile_dict = {}
+unit_to_build_tile_dict = {}
 is_builder = {}
 directions_dict = {"n": (0, -1), "e": (1, 0), "s": (0, 1), "w": (-1, 0)}
 adjacent_directions = [(0, 1), (0, -1), (-1, 0), (1, 0)]
@@ -396,8 +397,8 @@ def backup_plan(game_state, observation, unit, actions):
     """
     If standard procedure is not possible, build on the next available empty tile.
 
-    :param observation: (observation) Current game observation
     :param game_state: (game) Current game state
+    :param observation: (observation) Current game observation
     :param unit: (unit) Current unit in iteration
     :param actions: (list) Actions to be fulfilled at the end of the round
     """
@@ -434,6 +435,85 @@ def get_alternative_path(observation, a_star, city_tiles, closest_resource_tile)
             return closest_city_tile, path
 
     return None, path
+
+
+def get_tile_to_build_city(game_state, observation, a_star, unit, resource_tiles, city_tiles, wood_clusters, new_closest_city_tile=None):
+    """
+    Get the next tile to build a city on.
+
+    :param game_state: (game) Current game state
+    :param observation: (observation) Current game observation
+    :param a_star: (aStar) Current aStar object
+    :param unit: (unit) Current unit in iteration
+    :param resource_tiles: (list) All resource tiles on the map
+    :param city_tiles: (list) All city tiles on the map
+    :param wood_clusters: (list) All wood clusters on the map
+    :param new_closest_city_tile: (cell) New closest city tile for path calculation
+    :return: (cell) The tile to build the next city on
+    """
+    # Initialize build location tile
+    tile_to_build_city = None
+
+    # Get the closest city tile and closest resource tile of a cluster with the shortest distance
+    largest_wood_cluster = get_largest_cluster(clusters_of_resource_type=wood_clusters)
+    closest_city_tile, closest_resource_tile, shortest_distance = get_closest_city_and_resource(city_tiles=city_tiles, resource_cluster=largest_wood_cluster)
+
+    if new_closest_city_tile is not None:
+        closest_city_tile = new_closest_city_tile
+
+    # If the distance from the closest city to the closest resource tile of the cluster is larger than one, build towards the cluster
+    if shortest_distance > 1:
+        # Define start and end coordinates to calculate the build position
+        start_x, start_y = closest_city_tile.pos.x, closest_city_tile.pos.y
+        end_x, end_y = closest_resource_tile.pos.x, closest_resource_tile.pos.y
+
+        # Block all resource tiles while looking for a build position
+        a_star.toggle_resources_to_blocking(set_blocking=True, resource_tiles=resource_tiles, target_resource_tile=closest_resource_tile)
+        # Block all city tiles while looking for a build position
+        a_star.toggle_cities_to_blocking(game_state=game_state, set_blocking=True)
+        # Find a path avoiding all resource tiles
+        path = a_star.find_path(s_x=start_x, s_y=start_y, e_x=end_x, e_y=end_y)
+
+        # If no path is found, try to find another one
+        if path is None:
+            logging.info(f'{observation["step"]}: No shortest distance path found for worker {unit.id} from locations ({start_x}/{start_y}) to ({end_x}/{end_y})!\n')
+            closest_city_tile, path = get_alternative_path(observation=observation, a_star=a_star, city_tiles=city_tiles, closest_resource_tile=closest_resource_tile)
+
+        # If path is still not found, perform backup plan
+        if path is None:
+            return tile_to_build_city
+
+        # Get the direction of the build position (from the closest city tile)
+        build_city_direction = a_star.path_to_direction(path)
+        # Unblock all resource tiles
+        a_star.toggle_resources_to_blocking(set_blocking=False, resource_tiles=resource_tiles)
+        # Unblock all city tiles
+        a_star.toggle_cities_to_blocking(game_state=game_state, set_blocking=False)
+        # Get the build position cell object by directional argument
+        tile_to_build_city = get_adjacent_tile_by_direction(game_state=game_state, tile=closest_city_tile, direction=build_city_direction)
+    # If the distance from the closest city to the closest resource tile of the cluster is not larger than one, build adjacent a city tile
+    else:
+        # Get an empty adjacent city tile of the closest city
+        closest_city_tile_to_unit = get_closest_city_tile(unit=unit, city_tiles=city_tiles)
+        empty_adjacent_tile = get_empty_adjacent_tile(game_state=game_state, observation=observation, tile=closest_city_tile_to_unit)
+
+        # If the closest city has no empty adjacent city tile, check for empty adjacent city tiles for every city
+        if empty_adjacent_tile is None:
+            logging.info(f'{observation["step"]}: No adjacent empty tile found for city tile ({closest_city_tile_to_unit.pos.x}/{closest_city_tile_to_unit.pos.y})!\n')
+            for city_tile in city_tiles:
+                empty_adjacent_tile = get_empty_adjacent_tile(game_state=game_state, observation=observation, tile=city_tile)
+
+                # If an empty tile was found, set it as build location
+                if empty_adjacent_tile is not None:
+                    tile_to_build_city = empty_adjacent_tile
+
+                    break
+                else:
+                    logging.info(f'{observation["step"]}: No adjacent empty tile found for city tile ({city_tile.pos.x}/{city_tile.pos.y})!\n')
+        else:
+            tile_to_build_city = empty_adjacent_tile
+
+    return tile_to_build_city
 
 
 ############ START A* ############
@@ -671,6 +751,8 @@ class AStar():
 def agent(observation, configuration):
     global game_state
     global unit_to_resource_tile_dict
+    global unit_to_target_tile_dict
+    global unit_to_build_tile_dict
     global is_builder
     global directions_dict
     global adjacent_directions
@@ -694,6 +776,11 @@ def agent(observation, configuration):
     width, height = game_state.map.width, game_state.map.height
     actions = []
 
+    # Clear dics
+    unit_to_resource_tile_dict.clear()
+    unit_to_target_tile_dict.clear()
+    unit_to_build_tile_dict.clear()
+
     # Create list of resource tiles
     resource_tiles = get_all_resource_tiles(game_state=game_state)# Block the current unit position node for the next worker
 
@@ -715,6 +802,7 @@ def agent(observation, configuration):
     worker_blocked_nodes = []
 
     ############ START WORKER ACTION TREE ############
+
     for unit in player.units:
         if unit.is_worker() and unit.can_act() and len(resource_tiles) > 0:
             # Assign each worker to a single unassigned resource
@@ -731,6 +819,7 @@ def agent(observation, configuration):
 
                 # If the assigned resource is None, set the current worker position as destination (move to center), else destination is assigned resource
                 if assigned_resource_tile is None:
+                    # TODO implement something smart so workers do cool shit like going to adjacent tiles of assigned resources
                     current_position_tile = game_state.map.get_cell(unit.pos.x, unit.pos.y)
                     unit_to_target_tile_dict[unit.id] = current_position_tile
                 else:
@@ -747,7 +836,7 @@ def agent(observation, configuration):
                 city_fuel = city.fuel
 
                 # If the city fuel is enough to survive eleven rounds, the city will survive the night, else not
-                if city_fuel <= city.get_light_upkeep() * 11:
+                if city_fuel <= city.get_light_upkeep() * 12:
                     city_survives = False
                 else:
                     city_survives = True
@@ -765,81 +854,33 @@ def agent(observation, configuration):
                     is_builder[unit.id] = False
                 else:
                     # If the city survives the night, build a new city tile
-                    # Get the closest city tile and closest resource tile of a cluster with the shortest distance
-                    largest_wood_cluster = get_largest_cluster(clusters_of_resource_type=wood_clusters)
-                    closest_city_tile, closest_resource_tile, shortest_distance = get_closest_city_and_resource(city_tiles=city_tiles, resource_cluster=largest_wood_cluster)
+                    tile_to_build_city = get_tile_to_build_city(game_state=game_state, observation=observation, a_star=a_star, unit=unit, resource_tiles=resource_tiles, city_tiles=city_tiles, wood_clusters=wood_clusters)
 
-                    # Initialize build location tile
-                    tile_to_build_city = None
+                    # TODO: Handle multiple workers wanting to build on same location
+                    # If the build location already exists (assign to another worker), find the next one
+                    if tile_to_build_city is not None:
+                        for build_location in unit_to_build_tile_dict.values():
+                            if tile_to_build_city.pos.x == build_location.pos.x and tile_to_build_city.pos.y == build_location.pos.y:
+                                closest_city_tile = build_location
+                                tile_to_build_city = get_tile_to_build_city(game_state=game_state, observation=observation, a_star=a_star, unit=unit, resource_tiles=resource_tiles, city_tiles=city_tiles, wood_clusters=wood_clusters, new_closest_city_tile=closest_city_tile)
 
-                    # If the distance from the closest city to the closest resource tile of the cluster is larger than one, build towards the cluster
-                    if shortest_distance > 1:
-                        # Define start and end coordinates to calculate the build position
-                        start_x, start_y = closest_city_tile.pos.x, closest_city_tile.pos.y
-                        end_x, end_y = closest_resource_tile.pos.x, closest_resource_tile.pos.y
-
-                        # TODO: Block resource tiles, city tiles and next worker positions
-                        # Block all resource tiles while looking for a build position
-                        a_star.toggle_resources_to_blocking(set_blocking=True, resource_tiles=resource_tiles, target_resource_tile=closest_resource_tile)
-                        # Block all city tiles while looking for a build position
-                        a_star.toggle_cities_to_blocking(game_state=game_state, set_blocking=True)
-                        # Find a path avoiding all resource tiles
-                        path = a_star.find_path(s_x=start_x, s_y=start_y, e_x=end_x, e_y=end_y)
-
-                        # TODO: Handle no path being found!
-                        # If no path is found, try to find another one
-                        if path is None:
-                            logging.info(f'{observation["step"]}: No shortest distance path found for worker {unit.id} from locations ({start_x}/{start_y}) to ({end_x}/{end_y})!\n')
-                            closest_city_tile, path = get_alternative_path(observation=observation, a_star=a_star, city_tiles=city_tiles, closest_resource_tile=closest_resource_tile)
-
-                        # If path is still not found, perform backup plan
-                        if path is None:
-                            backup_plan(game_state=game_state, observation=observation, unit=unit, actions=actions)
-
-                            continue
-
-                        # Get the direction of the build position (from the closest city tile)
-                        build_city_direction = a_star.path_to_direction(path)
-                        # Unblock all resource tiles
-                        a_star.toggle_resources_to_blocking(set_blocking=False, resource_tiles=resource_tiles)
-                        # Unblock all city tiles
-                        a_star.toggle_cities_to_blocking(game_state=game_state, set_blocking=False)
-                        # Get the build position cell object by directional argument
-                        tile_to_build_city = get_adjacent_tile_by_direction(game_state=game_state, tile=closest_city_tile, direction=build_city_direction)
-                    # If the distance from the closest city to the closest resource tile of the cluster is not larger than one, build adjacent a city tile
-                    else:
-                        # Get an empty adjacent city tile of the closest city
-                        closest_city_tile_to_unit = get_closest_city_tile(unit=unit, city_tiles=city_tiles)
-                        empty_adjacent_tile = get_empty_adjacent_tile(game_state=game_state, observation=observation, tile=closest_city_tile_to_unit)
-
-                        # If the closest city has no empty adjacent city tile, check for empty adjacent city tiles for every city
-                        if empty_adjacent_tile is None:
-                            logging.info(f'{observation["step"]}: No adjacent empty tile found for city tile ({closest_city_tile_to_unit.pos.x}/{closest_city_tile_to_unit.pos.y})!\n')
-                            for city_tile in city_tiles:
-                                empty_adjacent_tile = get_empty_adjacent_tile(game_state=game_state, observation=observation, tile=city_tile)
-
-                                # If an empty tile was found, set it as build location
-                                if empty_adjacent_tile is not None:
-                                    tile_to_build_city = empty_adjacent_tile
-
-                                    break
-                                else:
-                                    logging.info(f'{observation["step"]}: No adjacent empty tile found for city tile ({city_tile.pos.x}/{city_tile.pos.y})!\n')
-                        else:
-                            tile_to_build_city = empty_adjacent_tile
-
-                    # If no build location was found, execute backup plan
-                    if tile_to_build_city is None:
+                    # If no build location was found or build position is not valid, execute backup plan
+                    if tile_to_build_city is None or tile_to_build_city.has_resource() or tile_to_build_city.road != 0 or tile_to_build_city.citytile is not None:
                         backup_plan(game_state=game_state, observation=observation, unit=unit, actions=actions)
+
                         continue
 
                     # If worker is already on build site, build the city, else set the target destination
                     if unit.pos.x == tile_to_build_city.pos.x and unit.pos.y == tile_to_build_city.pos.y:
                         logging.info(f'{observation["step"]}: Worker {unit.id} is building at ({unit.pos.x}/{unit.pos.y})\n')
+                        # TODO: Handle multiple workers wanting to build on same location
+                        #unit_to_build_tile_dict[unit.id] = tile_to_build_city
                         actions.append(unit.build_city())
                     else:
                         # Set the build position as target tile for the worker
                         logging.info(f'{observation["step"]}: Worker {unit.id} wants to build at: ({tile_to_build_city.pos.x}/{tile_to_build_city.pos.y})\n')
+                        # TODO: Handle multiple workers wanting to build on same location
+                        #unit_to_build_tile_dict[unit.id] = tile_to_build_city
                         unit_to_target_tile_dict[unit.id] = tile_to_build_city
 
                     # Set worker as builder
@@ -874,6 +915,7 @@ def agent(observation, configuration):
             # Calculate the path, if no path is found, skip the worker and log a warning
             path = a_star.find_path(start_x, start_y, end_x, end_y)
             if path is None:
+                # TODO: Block not if he is on a city tile
                 logging.warning(f'{observation["step"]}: No path for worker {worker.id} from ({start_x}/{start_y}) to ({end_x}/{end_y}) found!\n')
 
                 # Block the current unit position node for the next worker
