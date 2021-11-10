@@ -7,6 +7,9 @@ replays/
 errorlogs/
 *.tar.gz
 
+# Submissions
+submissions/
+
 # Log Files
 *.log
 
