@@ -28,6 +28,8 @@ game_state = None
 unit_to_resource_tile_dict = {}
 unit_to_target_tile_dict = {}
 unit_to_build_tile_dict = {}
+unit_to_cluster_dict = {}
+unit_to_cityid_dict = {}
 unit_to_enemy_city_tiles_dict = {}
 is_builder = {}
 directions_dict = {"n": (0, -1), "e": (1, 0), "s": (0, 1), "w": (-1, 0)}
@@ -106,7 +108,7 @@ def get_workers(player):
 
 def get_cities_and_tiles(player):
     """
-    Return a list of all cities and city tiles for a specific player.
+    Get all cities and city tiles for a specific player.
 
     :param player: (player) The player from which to get cities and tiles from
     :return: (tuple of list, list) Cities and city tiles
@@ -120,6 +122,35 @@ def get_cities_and_tiles(player):
             city_tiles.append(city_tile)
 
     return cities, city_tiles
+
+
+def get_city_by_id(player, cityid):
+    """
+    Get a city of a player by the city id.
+
+    :param player: (player) The player from which to get city from
+    :param cityid: (string) The city id of a specific city
+    :return: (city) The city corresponding to the city id
+    """
+    cities, _ = get_cities_and_tiles(player=player)
+
+    for city in cities:
+        if city.cityid == cityid:
+            return city
+
+
+def get_tiles_of_city(city):
+    """
+    Get all city tiles of a specific city.
+
+    :return: (list) City tiles of the city
+    """
+    city_tiles = []
+
+    for city_tile in city.citytiles:
+        city_tiles.append(city_tile)
+
+    return city_tiles
 
 
 def get_adjacent_tile_by_direction(game_state, tile, direction):
@@ -140,6 +171,32 @@ def get_adjacent_tile_by_direction(game_state, tile, direction):
     else:
         adjacent_tile = game_state.map.get_cell(coordinates[0], coordinates[1])
         return adjacent_tile
+
+
+def get_entire_resource_tiles_cluster(game_state, resource_tile, resource_tiles_cluster=None):
+    """
+    Get a cluster of adjacent resource tiles.
+
+    :param game_state: (game) Current game state
+    :param resource_tile: (cell) The resource tile to check for adjacent resource tiles
+    :param resource_tiles_cluster: (list) The list of resource tiles currently found in the cluster
+    :return: (list) The adjacent resource tiles
+    """
+    if resource_tiles_cluster is None:
+        resource_tiles_cluster = []
+
+    # Iterate recursively over all adjacent directions of a resource tile to create a cluster list of adjacent resource tiles
+    for direction in directions_dict:
+        potential_resource_tile = get_adjacent_tile_by_direction(game_state=game_state, tile=resource_tile, direction=direction)
+
+        if potential_resource_tile is not None:
+            if potential_resource_tile.has_resource():
+                adjacent_resource_tile = potential_resource_tile
+                if not is_resource_in_cluster(resource_tile=adjacent_resource_tile, resource_cluster=resource_tiles_cluster):
+                    resource_tiles_cluster.append(adjacent_resource_tile)
+                    get_entire_resource_tiles_cluster(game_state=game_state, resource_tile=adjacent_resource_tile, resource_tiles_cluster=resource_tiles_cluster)
+
+    return resource_tiles_cluster
 
 
 def get_resource_tiles_cluster(game_state, resource_tile, resource_type, resource_tiles_cluster=None):
@@ -186,21 +243,47 @@ def is_resource_in_cluster(resource_tile, resource_cluster):
     return False
 
 
-def is_resource_in_all_clusters(resource_tile, resource_cluster_list):
+def is_resource_in_all_clusters(resource_tile, resource_clusters_dict):
     """
     Check if the resource tile is already part of a cluster in the list of clusters.
 
     :param resource_tile: (cell) The resource tile to check
-    :param resource_cluster_list: (list) The list of clusters for a specific resource type
+    :param resource_clusters_dict: (dict) The clusters for a specific resource type
     :return: (bool) Is resource tile already part of cluster
     """
     # If the resource is already in a cluster of the list of clusters, return ture, else return false
-    for cluster in resource_cluster_list:
+    for cluster in list(resource_clusters_dict.values()):
         for resource_tile_in_cluster in cluster:
             if resource_tile.pos.x == resource_tile_in_cluster.pos.x and resource_tile.pos.y == resource_tile_in_cluster.pos.y:
                 return True
 
     return False
+
+
+def search_for_all_clusters(game_state):
+    """
+    Search for all clusters of resources on the entire map.
+
+    :param game_state: (game) Current game state
+    :return: (list) All clusters of resources
+    """
+    id = 0
+    resource_tiles_clusters = {}
+    width, height = game_state.map.width, game_state.map.height
+
+    # Iterate over every cell of the map and search for resource clusters of a specific resource type recursively
+    for y in range(height):
+        for x in range(width):
+            tile = game_state.map.get_cell(x, y)
+            if tile.has_resource():
+                resource_tile = tile
+                if not is_resource_in_all_clusters(resource_tile=resource_tile, resource_clusters_dict=resource_tiles_clusters):
+                    resource_cluster = get_entire_resource_tiles_cluster(game_state=game_state, resource_tile=resource_tile)
+                    if len(resource_cluster) != 0:
+                        resource_tiles_clusters[id] = resource_cluster
+                        id += 1
+
+    return resource_tiles_clusters
 
 
 def search_for_clusters_of_resource(game_state, resource_type):
@@ -211,7 +294,8 @@ def search_for_clusters_of_resource(game_state, resource_type):
     :param resource_type: (string) The resource type to check for clusters
     :return: (list) All clusters of the specific resource type
     """
-    resource_tiles_clusters = []
+    id = 0
+    resource_tiles_clusters = {}
     width, height = game_state.map.width, game_state.map.height
 
     # Iterate over every cell of the map and search for resource clusters of a specific resource type recursively
@@ -220,12 +304,14 @@ def search_for_clusters_of_resource(game_state, resource_type):
             tile = game_state.map.get_cell(x, y)
             if tile.has_resource():
                 resource_tile = tile
-                if not is_resource_in_all_clusters(resource_tile=resource_tile, resource_cluster_list=resource_tiles_clusters):
+                if not is_resource_in_all_clusters(resource_tile=resource_tile, resource_clusters_dict=resource_tiles_clusters):
                     resource_cluster = get_resource_tiles_cluster(game_state=game_state, resource_tile=resource_tile, resource_type=resource_type)
                     if len(resource_cluster) != 0:
-                        resource_tiles_clusters.append(resource_cluster)
+                        resource_tiles_clusters[id] = resource_cluster
+                        id += 1
                     elif check_resource_tile_type(resource_tile=resource_tile, resource_type=resource_type):
-                        resource_tiles_clusters.append([resource_tile])
+                        resource_tiles_clusters[id] = resource_cluster
+                        id += 1
 
     return resource_tiles_clusters
 
@@ -338,27 +424,28 @@ def get_largest_cluster(clusters_of_resource_type):
     return largest_cluster
 
 
-def get_closest_cluster(unit, clusters_of_resource_type):
+def get_closest_cluster(unit, clusters_of_resource_type, closest_cluster):
     """
     Get the closest cluster of a specific resource type.
 
     :param unit: (unit) The unit from which to calculate the distance
     :param clusters_of_resource_type: (list) Clusters of a resource type
+    :param closest_cluster: (list) Already assigned cluster
     :return: (list) The closest cluster
     """
-    closest_cluster = []
     shortest_dist = math.inf
 
+    # If a closest cluster has already been assigned, return it
+    if closest_cluster is not None:
+        return closest_cluster
+
     # Search for the closest cluster in the list of clusters
-    for cluster in clusters_of_resource_type:
+    for cluster in list(clusters_of_resource_type.values()):
         for resource_tile in cluster:
             dist = unit.pos.distance_to(resource_tile.pos)
             if dist < shortest_dist:
                 shortest_dist = dist
                 closest_cluster = cluster
-
-    if len(closest_cluster) == 0:
-        closest_cluster = None
 
     # TODO: Handle two closest clusters with same distance (return the largest one)!
     # TODO: Handle exception if no cluster was found (closest_cluster is None)!
@@ -472,6 +559,7 @@ def backup_plan(game_state, observation, unit, actions):
     :param unit: (unit) Current unit in iteration
     :param actions: (list) Actions to be fulfilled at the end of the round
     """
+    is_builder[unit.id] = True
     current_position_tile = game_state.map.get_cell(unit.pos.x, unit.pos.y)
 
     if not current_position_tile.has_resource() and current_position_tile.road == 0 and current_position_tile.citytile is None:
@@ -507,7 +595,7 @@ def get_alternative_path(observation, a_star, city_tiles, closest_resource_tile)
     return None, path
 
 
-def get_tile_to_build_city(game_state, observation, a_star, unit, resource_tiles, city_tiles, wood_clusters, new_closest_city_tile=None):
+def get_tile_to_build_city(game_state, observation, a_star, unit, resource_tiles, city_tiles, resource_clusters, new_closest_city_tile=None):
     """
     Get the next tile to build a city on.
 
@@ -517,15 +605,26 @@ def get_tile_to_build_city(game_state, observation, a_star, unit, resource_tiles
     :param unit: (unit) Current unit in iteration
     :param resource_tiles: (list) All resource tiles on the map
     :param city_tiles: (list) All city tiles on the map
-    :param wood_clusters: (list) All wood clusters on the map
+    :param resource_clusters: (list) Resource clusters on the map
     :param new_closest_city_tile: (cell) New closest city tile for path calculation
     :return: (cell) The tile to build the next city on
     """
     # Initialize build location tile
     tile_to_build_city = None
 
+    # Check if a resource cluster has already been assigned to unit
+    if unit.id not in unit_to_cluster_dict:
+        closest_cluster = None
+    else:
+        closest_cluster = unit_to_cluster_dict[unit.id]
+
     # Get the closest city tile and closest resource tile of a cluster with the shortest distance
-    closest_wood_cluster = get_closest_cluster(unit=unit, clusters_of_resource_type=wood_clusters)
+    closest_wood_cluster = get_closest_cluster(unit=unit, clusters_of_resource_type=resource_clusters, closest_cluster=closest_cluster)
+    unit_to_cluster_dict[unit.id] = closest_wood_cluster
+
+    if closest_wood_cluster is None:
+        return None
+
     closest_city_tile, closest_resource_tile, shortest_distance = get_closest_city_and_resource(city_tiles=city_tiles, resource_cluster=closest_wood_cluster)
 
     if new_closest_city_tile is not None:
@@ -824,6 +923,8 @@ def agent(observation, configuration):
     global unit_to_resource_tile_dict
     global unit_to_target_tile_dict
     global unit_to_build_tile_dict
+    global unit_to_cluster_dict
+    global unit_to_cityid_dict
     global unit_to_enemy_city_tiles_dict
     global is_builder
     global directions_dict
@@ -852,7 +953,9 @@ def agent(observation, configuration):
     unit_to_resource_tile_dict.clear()
     unit_to_target_tile_dict.clear()
     unit_to_build_tile_dict.clear()
+    unit_to_cityid_dict.clear()
     unit_to_enemy_city_tiles_dict.clear()
+    is_builder.clear()
 
     # Create list of resource tiles
     resource_tiles = get_all_resource_tiles(game_state=game_state)# Block the current unit position node for the next worker
@@ -861,9 +964,10 @@ def agent(observation, configuration):
     workers = [unit for unit in player.units if unit.is_worker()]
 
     # Get all clusters of all resource types on the map
-    wood_clusters = search_for_clusters_of_resource(game_state=game_state, resource_type='wood')
-    coal_clusters = search_for_clusters_of_resource(game_state=game_state, resource_type='coal')
-    uranium_clusters = search_for_clusters_of_resource(game_state=game_state, resource_type='uranium')
+    all_clusters_dict = search_for_all_clusters(game_state=game_state)
+    wood_clusters_dict = search_for_clusters_of_resource(game_state=game_state, resource_type='wood')
+    coal_clusters_dict = search_for_clusters_of_resource(game_state=game_state, resource_type='coal')
+    uranium_clusters_dict = search_for_clusters_of_resource(game_state=game_state, resource_type='uranium')
 
     # Create a list of ally cities and city tiles
     cities, city_tiles = get_cities_and_tiles(player=player)
@@ -905,19 +1009,24 @@ def agent(observation, configuration):
 
                 # Set worker as not builder
                 is_builder[unit.id] = False
-            # If the worker as no cargo space left and if there is at least one city, check if the city has enough fuel to survive the night
-            elif len(cities) > 0:
-                # TODO: Adjust functionality if more than one city is built!
-                # Get city fuel information
-                city = cities[0]
+
+            # Check if the city has enough fuel to survive the night
+            if len(cities) > 0:
+                # Assign a unit to the closest city
+                closest_city_tile = get_closest_city_tile(unit=unit, city_tiles=city_tiles)
+                unit_to_cityid_dict[unit.id] = closest_city_tile.cityid
+
+                # Get city fuel information of assigned city
+                cityid = unit_to_cityid_dict[unit.id]
+                city = get_city_by_id(player=player, cityid=cityid)
                 city_fuel = city.fuel
 
-                city_survives = 'ERROR'
                 # If the city fuel is enough to survive eleven rounds, the city will survive the night, else not
+                city_survives = 'ERROR'
                 for start_night in first_night_turns:
                     if observation["step"] < start_night:
                         if observation["step"] >= start_night - 15:
-                            if city_fuel <= city.get_light_upkeep() * 11:
+                            if city_fuel <= city.get_light_upkeep() * 12:
                                 city_survives = False
                             else:
                                 city_survives = True
@@ -930,26 +1039,29 @@ def agent(observation, configuration):
 
                 logging.info(f'{observation["step"]}: City {city.cityid} Survival status: {city_survives} with Fuel: {city_fuel}\n')
 
-                # If the city will not survive the night or if the map has no more wood, go the the closest city tile and unload resources
-                if not city_survives or len(wood_clusters) == 0:
-                    logging.info(f'{observation["step"]}: Either the city {city.cityid} will die ({not city_survives}) or there are no wood clusters ({len(wood_clusters)}) !\n')
+                # If the city will not survive the night, go the the closest city tile and unload resources
+                if not city_survives and unit.get_cargo_space_left() <= 50:
+                    logging.info(f'{observation["step"]}: The city {city.cityid} will die ({not city_survives})!\n')
 
-                    closest_city_tile = get_closest_city_tile(unit=unit, city_tiles=city_tiles)
+                    city_tiles_of_assigned_city = get_tiles_of_city(city=city)
+                    closest_city_tile = get_closest_city_tile(unit=unit, city_tiles=city_tiles_of_assigned_city)
                     unit_to_target_tile_dict[unit.id] = closest_city_tile
 
                     # Set worker as not builder
                     is_builder[unit.id] = False
-                else:
-                    # If the city survives the night, build a new city tile
-                    tile_to_build_city = get_tile_to_build_city(game_state=game_state, observation=observation, a_star=a_star, unit=unit, resource_tiles=resource_tiles, city_tiles=city_tiles, wood_clusters=wood_clusters)
+
+                # If the city survives the night, unit has no cargo space left and there are still cities on map, build a new city tile adjacent to the assigned city
+                elif city_survives and unit.get_cargo_space_left() == 0:
+                    city_tiles_of_assigned_city = get_tiles_of_city(city=city)
+                    tile_to_build_city = get_tile_to_build_city(game_state=game_state, observation=observation, a_star=a_star, unit=unit, resource_tiles=resource_tiles, city_tiles=city_tiles_of_assigned_city, resource_clusters=all_clusters_dict)
 
                     # TODO: Handle multiple workers wanting to build on same location
                     # If the build location already exists (assign to another worker), find the next one
-                    if tile_to_build_city is not None:
-                        for build_location in unit_to_build_tile_dict.values():
-                            if tile_to_build_city.pos.x == build_location.pos.x and tile_to_build_city.pos.y == build_location.pos.y:
-                                closest_city_tile = build_location
-                                tile_to_build_city = get_tile_to_build_city(game_state=game_state, observation=observation, a_star=a_star, unit=unit, resource_tiles=resource_tiles, city_tiles=city_tiles, wood_clusters=wood_clusters, new_closest_city_tile=closest_city_tile)
+                    # if tile_to_build_city is not None:
+                    #     for build_location in unit_to_build_tile_dict.values():
+                    #         if tile_to_build_city.pos.x == build_location.pos.x and tile_to_build_city.pos.y == build_location.pos.y:
+                    #             closest_city_tile = build_location
+                    #             tile_to_build_city = get_tile_to_build_city(game_state=game_state, observation=observation, a_star=a_star, unit=unit, resource_tiles=resource_tiles, city_tiles=city_tiles, wood_clusters=wood_clusters_dict, new_closest_city_tile=closest_city_tile)
 
                     # If no build location was found or build position is not valid, execute backup plan
                     if tile_to_build_city is None or tile_to_build_city.has_resource() or tile_to_build_city.road != 0 or tile_to_build_city.citytile is not None:
@@ -962,6 +1074,7 @@ def agent(observation, configuration):
                         logging.info(f'{observation["step"]}: Worker {unit.id} is building at ({unit.pos.x}/{unit.pos.y})\n')
                         # TODO: Handle multiple workers wanting to build on same location
                         #unit_to_build_tile_dict[unit.id] = tile_to_build_city
+                        del unit_to_cluster_dict[unit.id]
                         actions.append(unit.build_city())
                     else:
                         # Set the build position as target tile for the worker
@@ -972,9 +1085,13 @@ def agent(observation, configuration):
 
                     # Set worker as builder
                     is_builder[unit.id] = True
-            # If all cities died, build a new one on the closest available empty tile
-            else:
+            # If all cities died and unit has no cargo space left, execute backup plan and build a new city tile on the closest available empty tile
+            elif unit.get_cargo_space_left() == 0:
                 backup_plan(game_state=game_state, observation=observation, unit=unit, actions=actions)
+        elif not unit.can_act():
+            current_tile = game_state.map.get_cell(unit.pos.x, unit.pos.y)
+            unit_to_target_tile_dict[unit.id] = current_tile
+            logging.info(f'{observation["step"]}: Unit {unit.id} cannot move, cooldown is too high!\n')
     ############ END WORKER ACTION TREE ############
 
     ############ START WORKER MOVEMENT ACTIONS ############
