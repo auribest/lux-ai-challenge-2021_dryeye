@@ -83,12 +83,9 @@ def compare_stats():
     stats_info_df.to_csv('stats_info.csv')
 
     # Create and save informational dataframe of stats per map size as .csv
-    stats_info_dict = {'Agent Name': [agent_names[0], agent_names[1], agent_names[0], agent_names[1], agent_names[0], agent_names[1], agent_names[0], agent_names[1]], 'Average City Tiles': [agent1_avg_city_tiles_12, agent2_avg_city_tiles_12],'Total Wins': [agent1_total_wins_12, agent2_total_wins_12], 'Map Size': ['12x12', '12x12']}
-    stats_info_dict.update({'Average City Tiles': [agent1_avg_city_tiles_16, agent2_avg_city_tiles_16],'Total Wins': [agent1_total_wins_16, agent2_total_wins_16], 'Map Size': ['16x16', '16x16']})
-    stats_info_dict.update({'Average City Tiles': [agent1_avg_city_tiles_24, agent2_avg_city_tiles_24], 'Total Wins': [agent1_total_wins_24, agent2_total_wins_24], 'Map Size': ['24x24', '24x24']})
-    stats_info_dict.update({'Average City Tiles': [agent1_avg_city_tiles_32, agent2_avg_city_tiles_32], 'Total Wins': [agent1_total_wins_32, agent2_total_wins_32], 'Map Size': ['32x32', '32x32']})
-    stats_info_dict = pd.DataFrame(data=stats_info_dict)
-    stats_info_dict.to_csv('stats_info_per_map.csv')
+    stats_info_per_map_dict = {'Agent Name': [agent_names[0], agent_names[1], agent_names[0], agent_names[1], agent_names[0], agent_names[1], agent_names[0], agent_names[1]], 'Average City Tiles': [agent1_avg_city_tiles_12, agent2_avg_city_tiles_12, agent1_avg_city_tiles_16, agent2_avg_city_tiles_16, agent1_avg_city_tiles_24, agent2_avg_city_tiles_24, agent1_avg_city_tiles_32, agent2_avg_city_tiles_32],'Total Wins': [agent1_total_wins_12, agent2_total_wins_12, agent1_total_wins_16, agent2_total_wins_16, agent1_total_wins_24, agent2_total_wins_24, agent1_total_wins_32, agent2_total_wins_32], 'Map Size': ['12x12', '12x12', '16x16', '16x16', '24x24', '24x24', '32x32', '32x32']}
+    stats_info_per_map_df = pd.DataFrame(data=stats_info_per_map_dict)
+    stats_info_per_map_df.to_csv('stats_info_per_map.csv')
 
     # Iterate over the list of all_stats_files and remove each file
     for stats_path in all_stats_files:
