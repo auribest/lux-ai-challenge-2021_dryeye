@@ -28,7 +28,7 @@ game_state = None
 unit_to_resource_tile_dict = {}
 unit_to_target_tile_dict = {}
 unit_to_build_tile_dict = {}
-unit_to_cluster_dict = {}
+unit_to_cluster_id_dict = {}
 unit_to_cityid_dict = {}
 unit_to_enemy_city_tiles_dict = {}
 is_builder = {}
@@ -267,7 +267,6 @@ def search_for_all_clusters(game_state):
     :param game_state: (game) Current game state
     :return: (list) All clusters of resources
     """
-    id = 0
     resource_tiles_clusters = {}
     width, height = game_state.map.width, game_state.map.height
 
@@ -280,8 +279,10 @@ def search_for_all_clusters(game_state):
                 if not is_resource_in_all_clusters(resource_tile=resource_tile, resource_clusters_dict=resource_tiles_clusters):
                     resource_cluster = get_entire_resource_tiles_cluster(game_state=game_state, resource_tile=resource_tile)
                     if len(resource_cluster) != 0:
+                        id = ""
+                        for resource_tile in resource_cluster:
+                            id += str(resource_tile.pos.x) + str(resource_tile.pos.y)
                         resource_tiles_clusters[id] = resource_cluster
-                        id += 1
 
     return resource_tiles_clusters
 
@@ -451,7 +452,7 @@ def get_largest_cluster(clusters_of_resource_type):
     return largest_cluster
 
 
-def get_closest_cluster(unit, clusters_of_resource_type, closest_cluster):
+def get_closest_cluster(game_state, unit, clusters_of_resource_type, closest_cluster):
     """
     Get the closest cluster of a specific resource type.
 
@@ -460,6 +461,7 @@ def get_closest_cluster(unit, clusters_of_resource_type, closest_cluster):
     :param closest_cluster: (list) Already assigned cluster
     :return: (list) The closest cluster
     """
+    closest_cluster_id = None
     shortest_dist = math.inf
 
     # If a closest cluster has already been assigned, return it
@@ -467,12 +469,18 @@ def get_closest_cluster(unit, clusters_of_resource_type, closest_cluster):
         return closest_cluster
 
     # Search for the closest cluster in the list of clusters
-    for cluster in list(clusters_of_resource_type.values()):
-        for resource_tile in cluster:
-            dist = unit.pos.distance_to(resource_tile.pos)
-            if dist < shortest_dist:
-                shortest_dist = dist
-                closest_cluster = cluster
+    for cluster_id in list(clusters_of_resource_type):
+        cluster = clusters_of_resource_type[cluster_id]
+        if list(unit_to_cluster_id_dict.values()).count(cluster_id) < len(cluster):
+            for resource_tile in cluster:
+                dist = unit.pos.distance_to(resource_tile.pos)
+                if dist < shortest_dist:
+                    shortest_dist = dist
+                    closest_cluster = cluster
+                    closest_cluster_id = cluster_id
+
+    if closest_cluster is not None:
+        unit_to_cluster_id_dict[unit.id] = closest_cluster_id
 
     # TODO: Handle two closest clusters with same distance (return the largest one)!
     # TODO: Handle exception if no cluster was found (closest_cluster is None)!
@@ -697,19 +705,20 @@ def get_alternative_tile_to_build_city(game_state, observation, a_star, unit, re
     tile_to_build_city = None
 
     # Check if a resource cluster has already been assigned to unit
-    if unit.id not in unit_to_cluster_dict:
+    if unit.id not in unit_to_cluster_id_dict:
+        closest_cluster = None
+    elif unit_to_cluster_id_dict[unit.id] not in resource_clusters:
         closest_cluster = None
     else:
-        closest_cluster = unit_to_cluster_dict[unit.id]
+        closest_cluster = resource_clusters[unit_to_cluster_id_dict[unit.id]]
 
     # Get the closest city tile and closest resource tile of a cluster with the shortest distance
-    closest_wood_cluster = get_closest_cluster(unit=unit, clusters_of_resource_type=resource_clusters, closest_cluster=closest_cluster)
-    unit_to_cluster_dict[unit.id] = closest_wood_cluster
+    closest_cluster = get_closest_cluster(game_state=game_state, unit=unit, clusters_of_resource_type=resource_clusters, closest_cluster=closest_cluster)
 
-    if closest_wood_cluster is None:
+    if closest_cluster is None:
         return None
 
-    closest_city_tile, closest_resource_tile, shortest_distance = get_closest_city_and_resource(city_tiles=city_tiles, resource_cluster=closest_wood_cluster)
+    closest_city_tile, closest_resource_tile, shortest_distance = get_closest_city_and_resource(city_tiles=city_tiles, resource_cluster=closest_cluster)
 
     if new_closest_city_tile is not None:
         closest_city_tile = new_closest_city_tile
@@ -784,19 +793,20 @@ def get_tile_to_build_city(game_state, observation, a_star, unit, resource_tiles
     :return: (cell) The tile to build the next city on
     """
     # Check if a resource cluster has already been assigned to unit
-    if unit.id not in unit_to_cluster_dict:
+    if unit.id not in unit_to_cluster_id_dict:
+        closest_cluster = None
+    elif unit_to_cluster_id_dict[unit.id] not in resource_clusters:
         closest_cluster = None
     else:
-        closest_cluster = unit_to_cluster_dict[unit.id]
+        closest_cluster = resource_clusters[unit_to_cluster_id_dict[unit.id]]
 
     # Get the closest cluster
-    closest_wood_cluster = get_closest_cluster(unit=unit, clusters_of_resource_type=resource_clusters, closest_cluster=closest_cluster)
-    unit_to_cluster_dict[unit.id] = closest_wood_cluster
+    closest_cluster = get_closest_cluster(game_state=game_state, unit=unit, clusters_of_resource_type=resource_clusters, closest_cluster=closest_cluster)
 
-    if closest_wood_cluster is None:
+    if closest_cluster is None:
         return None
 
-    empty_adjacent_tiles_with_adjacent_city, empty_adjacent_tiles = get_all_empty_adjacent_tiles_of_cluster(game_state=game_state, observation=observation, cluster=closest_wood_cluster)
+    empty_adjacent_tiles_with_adjacent_city, empty_adjacent_tiles = get_all_empty_adjacent_tiles_of_cluster(game_state=game_state, observation=observation, cluster=closest_cluster)
 
     if empty_adjacent_tiles_with_adjacent_city is not None:
         tile_to_build_city = get_closest_tile(unit=unit, tiles=empty_adjacent_tiles_with_adjacent_city)
@@ -1046,7 +1056,7 @@ def agent(observation, configuration):
     global unit_to_resource_tile_dict
     global unit_to_target_tile_dict
     global unit_to_build_tile_dict
-    global unit_to_cluster_dict
+    global unit_to_cluster_id_dict
     global unit_to_cityid_dict
     global unit_to_enemy_city_tiles_dict
     global is_builder
@@ -1149,7 +1159,9 @@ def agent(observation, configuration):
                 for start_night in first_night_turns:
                     if observation["step"] < start_night:
                         if observation["step"] >= start_night - 15:
-                            if city_fuel <= city.get_light_upkeep() * 12:
+                            scale = observation["step"] + 16 - start_night
+
+                            if city_fuel <= city.get_light_upkeep() * scale:
                                 city_survives = False
                             else:
                                 city_survives = True
@@ -1197,7 +1209,7 @@ def agent(observation, configuration):
                         logging.info(f'{observation["step"]}: Worker {unit.id} is building at ({unit.pos.x}/{unit.pos.y})\n')
                         # TODO: Handle multiple workers wanting to build on same location
                         #unit_to_build_tile_dict[unit.id] = tile_to_build_city
-                        del unit_to_cluster_dict[unit.id]
+                        del unit_to_cluster_id_dict[unit.id]
                         actions.append(unit.build_city())
                     else:
                         # Set the build position as target tile for the worker
