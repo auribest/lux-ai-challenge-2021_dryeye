@@ -1,6 +1,5 @@
 import sys
 import subprocess
-from compare_stats import compare_stats
 
 # Set user defined arguments
 version1 = str(sys.argv[1])
@@ -12,8 +11,8 @@ except:
     seed = None
 
 # Define agent paths
-agent1_path = f'submission_{version1}/main.py'
-agent2_path = f'submission_{version2}/main.py'
+agent1_path = f'.\\reinforcement_learning\\rl_player_main.py'
+agent2_path = f'.\\default_agent\\main.py'
 
 if seed is None:
     # Execute battles with random seeds
@@ -25,6 +24,3 @@ else:
     for i in range(runs):
         subprocess.check_call(f'lux-ai-2021 {agent1_path} {agent2_path} --seed {seed}', shell=True)
         print('\n')
-
-# Generate and save stats files
-compare_stats()
